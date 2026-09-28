@@ -10,6 +10,7 @@ import LanguagePageTranslator from "./language-page-translator";
 import NotificationBell from "./notification-bell";
 import VoiceTextTools from "./voice-text-tools";
 import { useLanguage } from "./i18n";
+import { getSessionUserIdentity } from "./login-session";
 
 const navItems = [
   ["home", "Dashboard", "/"],
@@ -114,10 +115,10 @@ function useCurrentStudent() {
           credentials: "include"
         });
         const session = await sessionResponse.json().catch(() => ({}));
-        const email = session?.user?.email?.trim();
+        const email = getSessionUserIdentity(session);
 
         if (!sessionResponse.ok || !email) {
-          throw new Error("Logged-in student email is unavailable.");
+          throw new Error("Logged-in student identity is unavailable.");
         }
 
         const params = new URLSearchParams({ email });

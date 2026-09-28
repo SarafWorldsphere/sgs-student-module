@@ -9,7 +9,6 @@ import StudyTabs from "../study-tabs";
 
 const API_BASE_URL = getApiBaseUrl();
 const CONFIGURED_LOGIN_SERVICE_URL = (process.env.NEXT_PUBLIC_LOGIN_URL || "").trim().replace(/\/+$/, "");
-const AI_REQUEST_DELAY_MS = 2000;
 
 function getLoginServiceUrl() {
   return CONFIGURED_LOGIN_SERVICE_URL || (typeof window !== "undefined" ? window.location.origin : "");
@@ -27,12 +26,6 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 35000) {
   } finally {
     window.clearTimeout(timeoutId);
   }
-}
-
-function waitBeforeAiRequest() {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, AI_REQUEST_DELAY_MS);
-  });
 }
 
 export default function QuizzesPage() {
@@ -181,7 +174,6 @@ export default function QuizzesPage() {
     setChapterTitle(selectedChapter.content_title);
 
     try {
-      await waitBeforeAiRequest();
       const userEmail = await getLoggedInUserEmail();
       const response = await fetchWithTimeout(`${API_BASE_URL}/ai/generate-quiz`, {
         method: "POST",
@@ -227,14 +219,10 @@ export default function QuizzesPage() {
     setStatus("Saving quiz result...");
 
     try {
-      const sessionResponse = await fetch(`${getLoginServiceUrl()}/api/auth/session`, {
-        credentials: "include"
-      });
-      const session = await sessionResponse.json().catch(() => ({}));
-      const studentEmail = session?.user?.email?.trim();
+      const studentEmail = await getLoggedInUserEmail();
 
-      if (!sessionResponse.ok || !studentEmail) {
-        throw new Error("Logged-in student email is unavailable.");
+      if (!studentEmail) {
+        throw new Error("Logged-in student identity is unavailable.");
       }
 
       const percentage = totalMarks > 0 ? Number(((marks / totalMarks) * 100).toFixed(2)) : 0;

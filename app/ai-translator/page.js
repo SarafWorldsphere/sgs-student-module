@@ -8,7 +8,6 @@ import DashboardShell from "../dashboard-shell";
 import StudyTabs from "../study-tabs";
 
 const API_BASE_URL = getApiBaseUrl();
-const AI_REQUEST_DELAY_MS = 2000;
 
 const languages = [
   "English",
@@ -45,12 +44,6 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 35000) {
   } finally {
     window.clearTimeout(timeoutId);
   }
-}
-
-function waitBeforeAiRequest() {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, AI_REQUEST_DELAY_MS);
-  });
 }
 
 export default function AiTranslatorPage() {
@@ -98,7 +91,6 @@ export default function AiTranslatorPage() {
     setTranslatedText("");
 
     try {
-      await waitBeforeAiRequest();
       const userEmail = await getLoggedInUserEmail();
       const response = await fetchWithTimeout(`${API_BASE_URL}/ai/translate-text`, {
         method: "POST",
