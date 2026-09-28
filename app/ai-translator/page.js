@@ -8,7 +8,7 @@ import DashboardShell from "../dashboard-shell";
 import StudyTabs from "../study-tabs";
 
 const API_BASE_URL = getApiBaseUrl();
-const AI_REQUEST_DELAY_MS = 15000;
+const AI_REQUEST_DELAY_MS = 2000;
 
 const languages = [
   "English",
