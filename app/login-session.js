@@ -13,6 +13,29 @@ function getLoginServiceUrl() {
 
 let sessionPromise = null;
 
+export function getSessionUserIdentity(session) {
+  const user = session?.user || {};
+  const candidates = [
+    user.email,
+    user.phone,
+    user.phoneNumber,
+    user.phone_number,
+    user.mobile,
+    user.mobileNumber,
+    user.mobile_number,
+    session?.email,
+    session?.phone,
+    session?.phoneNumber,
+    session?.phone_number,
+    session?.mobile,
+    session?.mobileNumber,
+    session?.mobile_number
+  ];
+
+  const identity = candidates.find((value) => typeof value === "string" && value.trim());
+  return identity?.trim() || null;
+}
+
 export async function getLoggedInUserEmail() {
   if (!sessionPromise) {
     sessionPromise = (async () => {
@@ -22,8 +45,8 @@ export async function getLoggedInUserEmail() {
         });
         if (response.ok) {
           const session = await response.json().catch(() => ({}));
-          const email = session?.user?.email?.trim();
-          if (email) return email;
+          const identity = getSessionUserIdentity(session);
+          if (identity) return identity;
         }
       } catch {
         // Local development may run without the external login application.

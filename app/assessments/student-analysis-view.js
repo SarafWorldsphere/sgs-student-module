@@ -2,50 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { getApiBaseUrl } from "../api-base-url";
+import { getLoggedInUserEmail } from "../login-session";
 
 
 const API_BASE_URL = getApiBaseUrl();
-const CONFIGURED_LOGIN_SERVICE_URL = (process.env.NEXT_PUBLIC_LOGIN_URL || "").trim().replace(/\/+$/, "");
 const COLORS = ["#1266d6", "#f2a900", "#42ad4b", "#f31f2f", "#8b5cf6", "#06b6d4"];
-
-function getLoginServiceUrl() {
-  return CONFIGURED_LOGIN_SERVICE_URL || (typeof window !== "undefined" ? window.location.origin : "");
-}
 
 
 async function getLoggedInStudentEmail() {
-  try {
-    const response = await fetch(`${getLoginServiceUrl()}/api/auth/session`, {
-      credentials: "include"
-    });
-    if (response.ok) {
-      const session = await response.json().catch(() => ({}));
-      const email = session?.user?.email?.trim();
-      if (email) {
-        return email;
-      }
-    }
-  } catch {
-    // Local development can run without the external login application.
-  }
-
-  if (process.env.NODE_ENV !== "production") {
-    const demoEmail = process.env.NEXT_PUBLIC_DEMO_STUDENT_EMAIL?.trim();
-    if (demoEmail) {
-      return demoEmail;
-    }
-    try {
-      const response = await fetch(`${API_BASE_URL}/students/current`);
-      if (response.ok) {
-        const data = await response.json().catch(() => ({}));
-        return data?.student?.student_email?.trim() || null;
-      }
-    } catch {
-      return null;
-    }
-  }
-
-  return null;
+  return getLoggedInUserEmail();
 }
 
 

@@ -228,7 +228,13 @@ def create_material_urls(file_url: str, file_name: str) -> tuple[str, str]:
 
 
 def fetch_current_student_record(student_email: str | None = None) -> dict:
-    email_filter = "AND LOWER(BTRIM(student.student_email)) = LOWER(BTRIM(%s))" if student_email else ""
+    identity_filter = """
+        AND (
+            LOWER(BTRIM(student.student_email)) = LOWER(BTRIM(%s))
+            OR RIGHT(REGEXP_REPLACE(COALESCE(student.student_phone, ''), '\\D', '', 'g'), 10)
+               = RIGHT(REGEXP_REPLACE(%s, '\\D', '', 'g'), 10)
+        )
+    """ if student_email else ""
     query = f"""
         SELECT
             student.student_id,
@@ -238,12 +244,13 @@ def fetch_current_student_record(student_email: str | None = None) -> dict:
             student.class_id,
             COALESCE(NULLIF(BTRIM(class_master.class_name), ''), NULLIF(BTRIM(student.class_name), ''), student.class_id::text) AS class_name,
             student.section,
-            student.student_email
+            student.student_email,
+            student.student_phone
         FROM sgs_student_master student
         LEFT JOIN sgs_class_master class_master
           ON class_master.class_id = student.class_id
         WHERE COALESCE(student.record_status, 'Active') = 'Active'
-          {email_filter}
+          {identity_filter}
         ORDER BY
             CASE WHEN student.admission_no IS NULL THEN 1 ELSE 0 END,
             student.student_id DESC
@@ -252,11 +259,11 @@ def fetch_current_student_record(student_email: str | None = None) -> dict:
 
     with get_connection() as connection:
         with connection.cursor(row_factory=dict_row) as cursor:
-            cursor.execute(query, (student_email,) if student_email else ())
+            cursor.execute(query, (student_email, student_email) if student_email else ())
             student = cursor.fetchone()
 
     if student is None:
-        detail = "No active student found for the logged-in email." if student_email else "No active student found."
+        detail = "No active student found for the logged-in email or phone number." if student_email else "No active student found."
         raise HTTPException(status_code=404, detail=detail)
 
     return student
