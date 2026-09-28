@@ -20,20 +20,38 @@ export function getSessionUserIdentity(session) {
     user.phone,
     user.phoneNumber,
     user.phone_number,
+    user.phoneNo,
+    user.phone_no,
     user.mobile,
     user.mobileNumber,
     user.mobile_number,
+    user.mobileNo,
+    user.mobile_no,
+    user.contactNumber,
+    user.contact_number,
+    user.identifier,
     session?.email,
     session?.phone,
     session?.phoneNumber,
     session?.phone_number,
+    session?.phoneNo,
+    session?.phone_no,
     session?.mobile,
     session?.mobileNumber,
-    session?.mobile_number
+    session?.mobile_number,
+    session?.mobileNo,
+    session?.mobile_no,
+    session?.contactNumber,
+    session?.contact_number,
+    session?.identifier
   ];
 
   const identity = candidates.find((value) => typeof value === "string" && value.trim());
-  return identity?.trim() || null;
+  if (identity) return identity.trim();
+
+  // Some phone-based NextAuth providers place the login number in `name`.
+  const name = typeof user.name === "string" ? user.name.trim() : "";
+  return name.replace(/\D/g, "").length >= 10 ? name : null;
 }
 
 export async function getLoggedInUserEmail() {

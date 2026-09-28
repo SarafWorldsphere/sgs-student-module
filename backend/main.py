@@ -231,8 +231,12 @@ def fetch_current_student_record(student_email: str | None = None) -> dict:
     identity_filter = """
         AND (
             LOWER(BTRIM(student.student_email)) = LOWER(BTRIM(%s))
-            OR RIGHT(REGEXP_REPLACE(COALESCE(student.student_phone, ''), '\\D', '', 'g'), 10)
-               = RIGHT(REGEXP_REPLACE(%s, '\\D', '', 'g'), 10)
+            OR (
+                LENGTH(REGEXP_REPLACE(%s, '\\D', '', 'g')) >= 10
+                AND LENGTH(REGEXP_REPLACE(COALESCE(student.student_phone, ''), '\\D', '', 'g')) >= 10
+                AND RIGHT(REGEXP_REPLACE(student.student_phone, '\\D', '', 'g'), 10)
+                    = RIGHT(REGEXP_REPLACE(%s, '\\D', '', 'g'), 10)
+            )
         )
     """ if student_email else ""
     query = f"""
@@ -259,7 +263,7 @@ def fetch_current_student_record(student_email: str | None = None) -> dict:
 
     with get_connection() as connection:
         with connection.cursor(row_factory=dict_row) as cursor:
-            cursor.execute(query, (student_email, student_email) if student_email else ())
+            cursor.execute(query, (student_email, student_email, student_email) if student_email else ())
             student = cursor.fetchone()
 
     if student is None:
