@@ -13,6 +13,10 @@ function getLoginServiceUrl() {
 
 let sessionPromise = null;
 
+function waitForSessionRetry(delayMs) {
+  return new Promise((resolve) => window.setTimeout(resolve, delayMs));
+}
+
 export function getSessionUserIdentity(session) {
   const user = session?.user || {};
   const candidates = [
@@ -57,17 +61,22 @@ export function getSessionUserIdentity(session) {
 export async function getLoggedInUserEmail() {
   if (!sessionPromise) {
     sessionPromise = (async () => {
-      try {
-        const response = await fetch(`${getLoginServiceUrl()}/api/auth/session`, {
-          credentials: "include"
-        });
-        if (response.ok) {
-          const session = await response.json().catch(() => ({}));
-          const identity = getSessionUserIdentity(session);
-          if (identity) return identity;
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        try {
+          const response = await fetch(`${getLoginServiceUrl()}/api/auth/session`, {
+            credentials: "include",
+            cache: "no-store"
+          });
+          if (response.ok) {
+            const session = await response.json().catch(() => ({}));
+            const identity = getSessionUserIdentity(session);
+            if (identity) return identity;
+          }
+        } catch {
+          // The auth session may still be settling immediately after OTP redirect.
         }
-      } catch {
-        // Local development may run without the external login application.
+
+        if (attempt < 3) await waitForSessionRetry(300);
       }
 
       if (process.env.NODE_ENV !== "production") {
@@ -88,5 +97,7 @@ export async function getLoggedInUserEmail() {
     })();
   }
 
-  return sessionPromise;
+  const identity = await sessionPromise;
+  if (!identity) sessionPromise = null;
+  return identity;
 }

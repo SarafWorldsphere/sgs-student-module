@@ -10,7 +10,7 @@ import LanguagePageTranslator from "./language-page-translator";
 import NotificationBell from "./notification-bell";
 import VoiceTextTools from "./voice-text-tools";
 import { useLanguage } from "./i18n";
-import { getSessionUserIdentity } from "./login-session";
+import { getLoggedInUserEmail } from "./login-session";
 
 const navItems = [
   ["home", "Dashboard", "/"],
@@ -110,14 +110,9 @@ function useCurrentStudent() {
 
     async function loadStudent() {
       try {
-        const loginServiceUrl = getLoginServiceUrl();
-        const sessionResponse = await fetch(`${loginServiceUrl}/api/auth/session`, {
-          credentials: "include"
-        });
-        const session = await sessionResponse.json().catch(() => ({}));
-        const email = getSessionUserIdentity(session);
+        const email = await getLoggedInUserEmail();
 
-        if (!sessionResponse.ok || !email) {
+        if (!email) {
           throw new Error("Logged-in student identity is unavailable.");
         }
 
