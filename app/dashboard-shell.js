@@ -11,6 +11,7 @@ import NotificationBell from "./notification-bell";
 import VoiceTextTools from "./voice-text-tools";
 import { useLanguage } from "./i18n";
 import { getLoggedInUserEmail } from "./login-session";
+import LoginUpdatePopup from "./login-update-popup";
 
 const navItems = [
   ["home", "Dashboard", "/"],
@@ -305,6 +306,8 @@ function DashboardShellFrame({ children }) {
             <NotificationBell />
           </div>
         </header>
+
+        <LoginUpdatePopup enabled={currentPath === "/"} />
 
         <LanguagePageTranslator />
         {children}
