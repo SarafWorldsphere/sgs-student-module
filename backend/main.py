@@ -1887,6 +1887,187 @@ def calculate_performance_summary(student_id: int) -> dict:
     }
 
 
+PROGRESS_TESTS = (
+    ("pt1", "PT 1"),
+    ("pt2", "PT 2"),
+    ("pt3", "PT 3"),
+    ("pt4", "PT 4"),
+    ("weekly_test", "Weekly Test"),
+)
+
+
+def _progress_percentage(value, maximum):
+    if value is None:
+        return None
+    numeric_value = float(value)
+    numeric_maximum = float(maximum or 0)
+    percentage = (numeric_value / numeric_maximum * 100) if numeric_maximum > 0 else numeric_value
+    return round(max(0, min(percentage, 100)), 2)
+
+
+def _average(values):
+    available = [float(value) for value in values if value is not None]
+    return round(sum(available) / len(available), 2) if available else None
+
+
+@app.get("/student-progress")
+def get_student_progress(
+    email: str = Query(..., min_length=1),
+    academic_year: str | None = Query(default=None),
+    month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+):
+    """Return month-filtered CT and overall progress for the logged-in student."""
+    student = fetch_current_student_record(email)
+    query = """
+        SELECT
+            marks.marks_id,
+            marks.exam_id,
+            exam.exam_name,
+            exam.exam_type,
+            exam.academic_year,
+            exam.start_date,
+            exam.end_date,
+            marks.subject_id,
+            COALESCE(NULLIF(BTRIM(subject.subject_name), ''), 'Subject ' || marks.subject_id::text) AS subject_name,
+            marks.marks_obtained,
+            marks.max_marks,
+            marks.grade,
+            marks.remarks,
+            marks.pt1,
+            marks.pt2,
+            marks.pt3,
+            marks.pt4,
+            marks.weekly_test
+        FROM sgs_student_marks marks
+        LEFT JOIN sgs_exam_master exam ON exam.exam_id = marks.exam_id
+        LEFT JOIN sgs_subject_master subject ON subject.subject_id = marks.subject_id
+        WHERE marks.student_id = %s
+          AND COALESCE(marks.record_status, 'Active') = 'Active'
+        ORDER BY exam.start_date, subject.subject_name, marks.marks_id;
+    """
+    try:
+        with get_connection() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(query, (student["student_id"],))
+                rows = list(cursor.fetchall())
+    except psycopg.errors.UndefinedTable as error:
+        raise HTTPException(status_code=500, detail="Student marks, exam master, or subject master table is missing.") from error
+    except psycopg.Error as error:
+        logger.exception("Unable to fetch student progress")
+        raise HTTPException(status_code=500, detail="Unable to fetch student progress.") from error
+
+    academic_years = sorted(
+        {str(row["academic_year"]).strip() for row in rows if row.get("academic_year")},
+        reverse=True,
+    )
+    selected_year = academic_year or (academic_years[0] if academic_years else None)
+    year_rows = [row for row in rows if selected_year is None or str(row.get("academic_year") or "") == selected_year]
+
+    month_values = sorted(
+        {row["start_date"].strftime("%Y-%m") for row in year_rows if row.get("start_date")},
+        reverse=True,
+    )
+    filtered_rows = [
+        row for row in year_rows
+        if month is None or (row.get("start_date") and row["start_date"].strftime("%Y-%m") == month)
+    ]
+
+    subject_groups = {}
+    completed_ct_count = 0
+    for row in filtered_rows:
+        subject_key = str(row.get("subject_id") or row["subject_name"])
+        group = subject_groups.setdefault(subject_key, {
+            "subject_id": row.get("subject_id"),
+            "subject_name": row["subject_name"],
+            "tests": {key: [] for key, _ in PROGRESS_TESTS},
+            "exam_percentages": [],
+            "grades": [],
+            "remarks": [],
+        })
+        for key, _label in PROGRESS_TESTS:
+            percentage = _progress_percentage(row.get(key), row.get("max_marks"))
+            if percentage is not None:
+                group["tests"][key].append({"marks": float(row[key]), "percentage": percentage})
+                completed_ct_count += 1
+        exam_percentage = _progress_percentage(row.get("marks_obtained"), row.get("max_marks"))
+        if exam_percentage is not None:
+            group["exam_percentages"].append(exam_percentage)
+        if row.get("grade"):
+            group["grades"].append(str(row["grade"]))
+        if row.get("remarks"):
+            group["remarks"].append(str(row["remarks"]))
+
+    subjects = []
+    for group in subject_groups.values():
+        tests = []
+        ct_percentages = []
+        for key, label in PROGRESS_TESTS:
+            entries = group["tests"][key]
+            test_percentage = _average(entry["percentage"] for entry in entries)
+            test_marks = _average(entry["marks"] for entry in entries)
+            tests.append({"key": key, "label": label, "marks": test_marks, "percentage": test_percentage})
+            if test_percentage is not None:
+                ct_percentages.append(test_percentage)
+        ct_average = _average(ct_percentages)
+        exam_average = _average(group["exam_percentages"])
+        subjects.append({
+            "subject_id": group["subject_id"],
+            "subject_name": group["subject_name"],
+            "tests": tests,
+            "ct_average": ct_average,
+            "exam_average": exam_average,
+            "overall_percentage": ct_average if ct_average is not None else exam_average,
+            "grade": group["grades"][-1] if group["grades"] else None,
+            "remarks": group["remarks"][-1] if group["remarks"] else None,
+        })
+    subjects.sort(key=lambda item: item["subject_name"].lower())
+
+    ranked = [subject for subject in subjects if subject["overall_percentage"] is not None]
+    strongest = max(ranked, key=lambda item: item["overall_percentage"], default=None)
+    improvement = min(ranked, key=lambda item: item["overall_percentage"], default=None)
+
+    monthly_progress = []
+    for month_value in sorted(month_values):
+        percentages = []
+        for row in year_rows:
+            if not row.get("start_date") or row["start_date"].strftime("%Y-%m") != month_value:
+                continue
+            ct_values = [_progress_percentage(row.get(key), row.get("max_marks")) for key, _ in PROGRESS_TESTS]
+            row_average = _average(ct_values)
+            if row_average is None:
+                row_average = _progress_percentage(row.get("marks_obtained"), row.get("max_marks"))
+            if row_average is not None:
+                percentages.append(row_average)
+        month_date = datetime.strptime(month_value, "%Y-%m")
+        monthly_progress.append({
+            "month": month_value,
+            "label": month_date.strftime("%B %Y"),
+            "average_percentage": _average(percentages),
+        })
+
+    return {
+        "student": student,
+        "filters": {
+            "academic_years": academic_years,
+            "selected_academic_year": selected_year,
+            "months": [
+                {"value": value, "label": datetime.strptime(value, "%Y-%m").strftime("%B %Y")}
+                for value in month_values
+            ],
+            "selected_month": month,
+        },
+        "summary": {
+            "overall_average": _average(subject["overall_percentage"] for subject in subjects),
+            "subject_count": len(subjects),
+            "completed_ct_count": completed_ct_count,
+            "strongest_subject": strongest["subject_name"] if strongest else None,
+            "improvement_subject": improvement["subject_name"] if improvement else None,
+        },
+        "subjects": subjects,
+        "monthly_progress": monthly_progress,
+    }
+
+
 @app.get("/student-performance-summary")
 def get_student_performance_summary(
     student_id: int = Query(..., ge=1),
