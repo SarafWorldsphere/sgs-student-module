@@ -56,6 +56,12 @@ export default function LoginUpdatePopup({ enabled = true }) {
 
   if (!enabled || !visible || updates.length === 0) return null;
 
+  const tickerCharacterCount = updates.reduce(
+    (total, update) => total + update.label.length + update.title.length + update.meta.length,
+    0
+  );
+  const tickerDuration = Math.max(75, Math.round(tickerCharacterCount * 0.24));
+
   return (
     <section className="login-updates-ticker" aria-label="Latest student updates">
       <div className="login-updates-ticker-label">
@@ -64,7 +70,7 @@ export default function LoginUpdatePopup({ enabled = true }) {
       </div>
 
       <div className="login-updates-ticker-window">
-        <div className="login-updates-ticker-track">
+        <div className="login-updates-ticker-track" style={{ "--login-update-duration": `${tickerDuration}s` }}>
           {[...updates, ...updates].map((update, index) => (
             <article className={`login-update-ticker-item ${update.type}`} key={`${update.id}-${index}`}>
               <span className="login-update-ticker-type">{update.label}</span>

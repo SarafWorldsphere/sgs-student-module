@@ -448,13 +448,168 @@ function MockTestView() {
   );
 }
 
+const COMPETITIVE_EXAMS = [
+  {
+    id: "science-talent-2026",
+    title: "National Science Talent Search",
+    subject: "Science",
+    level: "School Level",
+    duration: 30,
+    marks: 15,
+    availableUntil: "20 Oct 2026",
+    questions: [
+      { type: "single", question: "Which part of a plant primarily absorbs water from the soil?", options: ["Flower", "Root", "Stem", "Leaf"], answer: 1, topic: "Plant Life" },
+      { type: "multiple", question: "Select all forces that can act without direct physical contact.", options: ["Gravity", "Magnetism", "Friction", "Muscular force"], answer: [0, 1], topic: "Force" },
+      { type: "integer", question: "How many poles does a bar magnet have?", answer: "2", topic: "Magnetism" }
+    ]
+  },
+  {
+    id: "math-olympiad-2026",
+    title: "Inter-School Mathematics Olympiad",
+    subject: "Mathematics",
+    level: "Inter-School",
+    duration: 30,
+    marks: 15,
+    availableUntil: "25 Oct 2026",
+    questions: [
+      { type: "single", question: "What is 25% of 200?", options: ["25", "40", "50", "75"], answer: 2, topic: "Percentage" },
+      { type: "multiple", question: "Select all prime numbers.", options: ["21", "29", "31", "51"], answer: [1, 2], topic: "Number System" },
+      { type: "integer", question: "Enter the sum of the angles of a triangle in degrees.", answer: "180", topic: "Geometry" }
+    ]
+  }
+];
+
+function CompetitiveExamView() {
+  const [exam, setExam] = useState(null);
+  const [phase, setPhase] = useState("list");
+  const [agreed, setAgreed] = useState(false);
+  const [answers, setAnswers] = useState({});
+  const [reviewed, setReviewed] = useState([]);
+  const [currentQuestion, setCurrentQuestion] = useState(0);
+  const [timeLeft, setTimeLeft] = useState(0);
+
+  useEffect(() => {
+    if (phase !== "attempt" || timeLeft <= 0) return undefined;
+    const timer = window.setTimeout(() => setTimeLeft((value) => value - 1), 1000);
+    return () => window.clearTimeout(timer);
+  }, [phase, timeLeft]);
+
+  useEffect(() => {
+    if (phase === "attempt" && timeLeft === 0) setPhase("result");
+  }, [phase, timeLeft]);
+
+  function openExam(selectedExam) {
+    setExam(selectedExam);
+    setPhase("instructions");
+    setAgreed(false);
+    setAnswers({});
+    setReviewed([]);
+    setCurrentQuestion(0);
+  }
+
+  function beginExam() {
+    setTimeLeft(exam.duration * 60);
+    setPhase("attempt");
+  }
+
+  function resetExam() {
+    setExam(null);
+    setPhase("list");
+    setAnswers({});
+    setReviewed([]);
+    setCurrentQuestion(0);
+  }
+
+  const questions = exam?.questions || [];
+  const activeQuestion = questions[currentQuestion];
+  function isCorrect(question, answer) {
+    if (question.type === "multiple") {
+      const selected = Array.isArray(answer) ? [...answer].sort((a, b) => a - b) : [];
+      const expected = [...question.answer].sort((a, b) => a - b);
+      return selected.length === expected.length && selected.every((value, index) => value === expected[index]);
+    }
+    if (question.type === "integer") return String(answer ?? "").trim() === String(question.answer).trim();
+    return answer === question.answer;
+  }
+
+  function toggleMultipleAnswer(optionIndex) {
+    setAnswers((current) => {
+      const selected = Array.isArray(current[currentQuestion]) ? current[currentQuestion] : [];
+      const next = selected.includes(optionIndex) ? selected.filter((item) => item !== optionIndex) : [...selected, optionIndex];
+      return { ...current, [currentQuestion]: next };
+    });
+  }
+
+  function clearCurrentAnswer() {
+    setAnswers((current) => {
+      const next = { ...current };
+      delete next[currentQuestion];
+      return next;
+    });
+  }
+
+  function correctAnswerLabel(question) {
+    if (question.type === "integer") return question.answer;
+    if (question.type === "multiple") return question.answer.map((index) => question.options[index]).join(", ");
+    return question.options[question.answer];
+  }
+
+  const correctCount = questions.reduce((total, question, index) => total + (isCorrect(question, answers[index]) ? 1 : 0), 0);
+  const score = correctCount * 5;
+  const resultPercentage = questions.length ? Math.round((correctCount / questions.length) * 100) : 0;
+  const weakTopics = questions.filter((question, index) => !isCorrect(question, answers[index])).map((question) => question.topic);
+  const competitiveAnsweredCount = questions.filter((question, index) => {
+    const answer = answers[index];
+    return question.type === "multiple" ? Array.isArray(answer) && answer.length > 0 : String(answer ?? "").trim() !== "";
+  }).length;
+
+  if (phase === "list") {
+    return <section className="competitive-view">
+      <header className="competitive-heading"><div><span className="competitive-eyebrow">Competitive examinations</span><h2>Available Exams</h2><p>Attempt question papers uploaded by your faculty and receive an instant performance report.</p></div><div className="competitive-count"><strong>{COMPETITIVE_EXAMS.length}</strong><span>Available</span></div></header>
+      <div className="competitive-exam-grid">{COMPETITIVE_EXAMS.map((item, index) => <article className="competitive-event-card" key={item.id}>
+        <div className={`competitive-card-art tone-${(index % 4) + 1}`}><span>★</span><small>{item.level}</small></div>
+        <div className="competitive-card-body"><div className="competitive-card-tags"><span>{item.subject}</span><span>MCQ</span></div><h3>{item.title}</h3><p>Question paper published for your class.</p><div className="competitive-card-meta"><span>{item.questions.length} Questions</span><span>{item.duration} Minutes</span></div><div className="competitive-card-foot"><span>Available until</span><strong>{item.availableUntil}</strong></div><button type="button" onClick={() => openExam(item)}>View &amp; Start Exam</button></div>
+      </article>)}</div>
+      <p className="competitive-preview-note">Preview data is shown for UI validation. Faculty-uploaded exams will replace it when the API is connected.</p>
+    </section>;
+  }
+
+  if (phase === "instructions") {
+    return <section className="competitive-view"><button className="competitive-back" type="button" onClick={resetExam}>← Back to exams</button><article className="competitive-notice-card">
+      <div className="competitive-notice-banner"><span>MCQ</span><div><small>{exam.level}</small><h2>{exam.title}</h2><p>{exam.subject} competitive examination</p></div></div>
+      <div className="competitive-facts"><div><span>Questions</span><strong>{questions.length}</strong></div><div><span>Duration</span><strong>{exam.duration} min</strong></div><div><span>Total Marks</span><strong>{exam.marks}</strong></div><div><span>Marks/Question</span><strong>5</strong></div><div><span>Question Type</span><strong>MCQ</strong></div><div><span>Result</span><strong>Instant</strong></div></div>
+      <div className="competitive-instructions"><h3>Instructions</h3><ul><li>Select one answer for each question.</li><li>You can move between questions and mark them for review.</li><li>The exam will submit automatically when the timer ends.</li><li>Your result and AI-generated feedback will appear after submission.</li></ul></div>
+      <label className="competitive-agreement"><input type="checkbox" checked={agreed} onChange={(event) => setAgreed(event.target.checked)} /><span>I have read and understood the exam instructions.</span></label>
+      <button className="primary-button" type="button" disabled={!agreed} onClick={beginExam}>Start Exam</button>
+    </article></section>;
+  }
+
+  return <section className="competitive-view">
+    <header className="competitive-attempt-head"><div><span>{exam.subject} • {exam.level}</span><h2>{exam.title}</h2></div><div className="competitive-timer"><span>{phase === "result" ? "Status" : "Time Left"}</span><strong>{phase === "result" ? "Completed" : formatMockTimer(timeLeft)}</strong></div></header>
+    <div className="competitive-attempt-layout"><article className="module-card competitive-question-card">
+      <div className="competitive-question-label"><span>Question {currentQuestion + 1} of {questions.length}</span><span>5 marks</span></div><h3>{activeQuestion.question}</h3>
+      <span className="competitive-answer-type">{activeQuestion.type === "multiple" ? "Select all correct options" : activeQuestion.type === "integer" ? "Enter an integer answer" : "Select one correct option"}</span>
+      {activeQuestion.type === "integer" ? <label className="competitive-integer-answer"><span>Your Answer</span><input type="number" step="1" value={answers[currentQuestion] ?? ""} disabled={phase === "result"} onChange={(event) => setAnswers((current) => ({ ...current, [currentQuestion]: event.target.value }))} placeholder="Enter numerical answer" /></label> : <div className="competitive-options">{activeQuestion.options.map((option, index) => {
+        const selected = activeQuestion.type === "multiple" ? (answers[currentQuestion] || []).includes(index) : answers[currentQuestion] === index;
+        const correct = phase === "result" && (activeQuestion.type === "multiple" ? activeQuestion.answer.includes(index) : activeQuestion.answer === index);
+        const wrong = phase === "result" && selected && !correct;
+        return <label className={`${selected ? "selected" : ""} ${correct ? "correct" : ""} ${wrong ? "wrong" : ""}`} key={option}><input type={activeQuestion.type === "multiple" ? "checkbox" : "radio"} name={`competitive-${currentQuestion}`} checked={selected} disabled={phase === "result"} onChange={() => activeQuestion.type === "multiple" ? toggleMultipleAnswer(index) : setAnswers((current) => ({ ...current, [currentQuestion]: index }))} /><i>{String.fromCharCode(65 + index)}</i><span>{option}</span></label>;
+      })}</div>}
+      {phase === "result" && <div className={`competitive-feedback ${isCorrect(activeQuestion, answers[currentQuestion]) ? "correct" : "wrong"}`}>{isCorrect(activeQuestion, answers[currentQuestion]) ? "Correct answer." : `Correct answer: ${correctAnswerLabel(activeQuestion)}`}</div>}
+      <div className="competitive-question-actions"><button className="soft-button" type="button" disabled={currentQuestion === 0} onClick={() => setCurrentQuestion((value) => value - 1)}>Previous</button>{phase === "attempt" && <><button className="soft-button" type="button" onClick={clearCurrentAnswer}>Clear Answer</button><button className="soft-button" type="button" onClick={() => setReviewed((items) => items.includes(currentQuestion) ? items.filter((item) => item !== currentQuestion) : [...items, currentQuestion])}>{reviewed.includes(currentQuestion) ? "Remove Review" : "Mark for Review"}</button></>}<button className="soft-button" type="button" disabled={currentQuestion === questions.length - 1} onClick={() => setCurrentQuestion((value) => value + 1)}>Next</button></div>
+    </article><aside className="module-card competitive-palette"><h3>{phase === "result" ? "Exam Result" : "Question Palette"}</h3><div className="competitive-palette-grid">{questions.map((question, index) => <button className={`${answers[index] !== undefined ? "answered" : ""} ${reviewed.includes(index) ? "reviewed" : ""} ${currentQuestion === index ? "current" : ""}`} type="button" key={question.question} onClick={() => setCurrentQuestion(index)}>{index + 1}</button>)}</div>
+      {phase === "attempt" ? <><div className="competitive-progress"><span>Answered <strong>{competitiveAnsweredCount}/{questions.length}</strong></span><span>Marked for review <strong>{reviewed.length}</strong></span><span>Unanswered <strong>{questions.length - competitiveAnsweredCount}</strong></span></div><button className="competitive-submit" type="button" onClick={() => setPhase("result")}>Submit Exam</button></> : <div className="competitive-result"><strong>{score}/{exam.marks}</strong><span>{resultPercentage}% Score</span><p>{resultPercentage >= 80 ? "Excellent performance!" : resultPercentage >= 60 ? "Good attempt. Keep practising." : "More practice will improve your score."}</p><div className="competitive-ai-summary"><b>AI Performance Insight</b><span>{weakTopics.length ? `Revise: ${[...new Set(weakTopics)].join(", ")}.` : "Strong performance across all assessed topics."}</span></div><button className="competitive-submit" type="button" onClick={resetExam}>Back to Exams</button></div>}
+    </aside></div>
+  </section>;
+}
+
 export default function AssessmentsPage() {
   const [activeOption, setActiveOption] = useState("mock-test");
 
   useEffect(() => {
     function applyRequestedView() {
       const requestedView = new URLSearchParams(window.location.search).get("view");
-      if (["mock-test", "student-analysis", "teacher-remark"].includes(requestedView)) {
+      if (["mock-test", "competitive-exams", "student-analysis", "teacher-remark"].includes(requestedView)) {
         setActiveOption(requestedView);
       }
     }
@@ -470,6 +625,7 @@ export default function AssessmentsPage() {
         <StudyTabs onAssessmentViewChange={setActiveOption} />
         <div className="module-content-area assessment-content-area">
           {activeOption === "mock-test" && <MockTestView />}
+          {activeOption === "competitive-exams" && <CompetitiveExamView />}
           {activeOption === "student-analysis" && <StudentAnalysisView />}
           {activeOption === "teacher-remark" && <TeacherRemarkView />}
         </div>

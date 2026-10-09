@@ -37,8 +37,9 @@ const studyTabs = [
     href: "/assessments",
     rows: [
       ["1) Mock Test", "/assessments?view=mock-test"],
-      ["2) Student Analysis", "/assessments?view=student-analysis"],
-      ["3) Teacher Remark", "/assessments?view=teacher-remark"]
+      ["2) Competitive Exams", "/assessments?view=competitive-exams"],
+      ["3) Student Analysis", "/assessments?view=student-analysis"],
+      ["4) Teacher Remark", "/assessments?view=teacher-remark"]
     ]
   }
 ];
