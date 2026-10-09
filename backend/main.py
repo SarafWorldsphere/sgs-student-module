@@ -131,6 +131,11 @@ class AssignmentSubmissionInput(BaseModel):
     file_content_base64: str = Field(..., min_length=1)
 
 
+class NotificationReadInput(BaseModel):
+    email: str = Field(..., min_length=3, max_length=150)
+    notification_ids: list[str] = Field(default_factory=list, max_length=100)
+
+
 def get_database_url() -> str:
     database_url = (os.getenv("DATABASE_URL") or "").strip()
     if not database_url:
@@ -1138,6 +1143,32 @@ def get_notifications(email: str = Query(..., min_length=3, max_length=150)):
             notice_id DESC
         LIMIT 10;
     """
+    results_query = """
+        SELECT
+            assessment.assessment_id,
+            assessment.title,
+            assessment.assessment_type,
+            assessment.assessment_date,
+            assessment.subject,
+            assessment.max_marks,
+            result.marks_obtained,
+            result.percentage,
+            COALESCE(result.is_absent, false) AS is_absent
+        FROM sgs_assessment_results result
+        INNER JOIN sgs_assessments assessment
+          ON assessment.assessment_id = result.assessment_id
+        WHERE result.student_id = %s
+          AND COALESCE(result.record_status, 'Active') = 'Active'
+          AND COALESCE(assessment.record_status, 'Active') = 'Active'
+        ORDER BY assessment.assessment_date DESC NULLS LAST, assessment.assessment_id DESC
+        LIMIT 10;
+    """
+    read_status_query = """
+        SELECT notification_type, source_id
+        FROM sgs_student_notification_status
+        WHERE student_id = %s
+          AND read_at IS NOT NULL;
+    """
 
     try:
         with get_connection() as connection:
@@ -1152,6 +1183,13 @@ def get_notifications(email: str = Query(..., min_length=3, max_length=150)):
 
                 cursor.execute(notices_query, (student["class_name"],))
                 notice_rows = cursor.fetchall()
+                cursor.execute(results_query, (student["student_id"],))
+                result_rows = cursor.fetchall()
+                cursor.execute(read_status_query, (student["student_id"],))
+                read_notification_keys = {
+                    (row["notification_type"], int(row["source_id"]))
+                    for row in cursor.fetchall()
+                }
     except HTTPException:
         raise
     except psycopg.errors.UndefinedTable as error:
@@ -1170,6 +1208,7 @@ def get_notifications(email: str = Query(..., min_length=3, max_length=150)):
                 "type": "assignment",
                 "id": f"assignment-{row['assignment_id']}",
                 "assignment_id": row["assignment_id"],
+                "source_id": row["assignment_id"],
                 "title": row.get("assignment_title") or "Assignment",
                 "body": row.get("assignment_text") or "",
                 "due_date": row.get("due_date"),
@@ -1182,6 +1221,7 @@ def get_notifications(email: str = Query(..., min_length=3, max_length=150)):
                 "priority": status["priority"],
                 "days_left": status["days_left"],
                 "is_countable": status["is_countable"],
+                "is_read": ("assignment", int(row["assignment_id"])) in read_notification_keys,
             }
         )
 
@@ -1197,27 +1237,87 @@ def get_notifications(email: str = Query(..., min_length=3, max_length=150)):
             "type": "notice",
             "id": f"notice-{notice['notice_id']}",
             "notice_id": notice["notice_id"],
+            "source_id": notice["notice_id"],
             "title": notice.get("notice_title") or "Notice",
             "message": notice.get("notice_text") or "-",
             "notice_date": notice.get("notice_date"),
             "applicable_class": notice.get("applicable_class") or "All",
-            "is_read": bool(notice.get("is_read")),
+            "is_read": ("notice", int(notice["notice_id"])) in read_notification_keys,
             "priority": "low",
             "is_countable": not bool(notice.get("is_read")),
         }
         for notice in notice_rows
     ]
-    notifications = [*assignments, *notices]
-    count = sum(1 for item in notifications if item.get("is_countable"))
+    results = [
+        {
+            "type": "result",
+            "id": f"result-{result['assessment_id']}",
+            "source_id": result["assessment_id"],
+            "assessment_id": result["assessment_id"],
+            "title": result.get("title") or result.get("assessment_type") or "Assessment Result",
+            "message": "Absent" if result.get("is_absent") else f"Score: {float(result.get('marks_obtained') or 0):g} / {float(result.get('max_marks') or 0):g}",
+            "assessment_type": result.get("assessment_type"),
+            "assessment_date": result.get("assessment_date"),
+            "subject": result.get("subject"),
+            "percentage": None if result.get("is_absent") else float(result.get("percentage") or 0),
+            "is_absent": bool(result.get("is_absent")),
+            "is_read": ("result", int(result["assessment_id"])) in read_notification_keys,
+            "priority": "low",
+            "is_countable": True,
+        }
+        for result in result_rows
+    ]
+    notifications = [*assignments, *notices, *results]
+    count = sum(1 for item in notifications if item.get("is_countable") and not item.get("is_read"))
 
     return {
         "student": student,
         "count": count,
         "assignments": assignments,
         "notices": notices,
+        "results": results,
         "notifications": notifications,
         "assignment_alert_error": assignment_alert_error,
     }
+
+
+@app.post("/notifications/read")
+def mark_notifications_read(payload: NotificationReadInput):
+    student = fetch_current_student_record(payload.email)
+    parsed_notifications = []
+    for notification_id in payload.notification_ids:
+        notification_type, separator, source_id = notification_id.partition("-")
+        if separator and notification_type in {"notice", "assignment", "result"} and source_id.isdigit():
+            parsed_notifications.append((notification_type, int(source_id)))
+
+    if not parsed_notifications:
+        return {"marked_read": 0}
+
+    query = """
+        INSERT INTO sgs_student_notification_status (
+            student_id,
+            notification_type,
+            source_id,
+            first_seen_at,
+            read_at
+        )
+        VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT (student_id, notification_type, source_id)
+        DO UPDATE SET read_at = CURRENT_TIMESTAMP;
+    """
+    try:
+        with get_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.executemany(
+                    query,
+                    [(student["student_id"], notification_type, source_id) for notification_type, source_id in parsed_notifications],
+                )
+    except psycopg.errors.UndefinedTable as error:
+        raise HTTPException(status_code=500, detail="Student notification status table is missing. Run migration 004.") from error
+    except psycopg.Error as error:
+        raise HTTPException(status_code=500, detail="Unable to update notification read status.") from error
+
+    return {"marked_read": len(parsed_notifications)}
 
 
 @app.get("/help-support")
