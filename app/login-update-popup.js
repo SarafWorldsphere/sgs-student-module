@@ -16,6 +16,7 @@ function formatNoticeDate(value) {
 export default function LoginUpdatePopup({ enabled = true }) {
   const [visible, setVisible] = useState(true);
   const [updates, setUpdates] = useState([]);
+  const [studentIdentity, setStudentIdentity] = useState("");
 
   useEffect(() => {
     if (!enabled) return undefined;
@@ -25,6 +26,7 @@ export default function LoginUpdatePopup({ enabled = true }) {
       try {
         const email = await getLoggedInUserEmail();
         if (!email) throw new Error("Logged-in student identity is unavailable.");
+        if (!cancelled) setStudentIdentity(email);
 
         const params = new URLSearchParams({ email });
         const response = await fetch(`${API_BASE_URL}/notifications?${params.toString()}`, { cache: "no-store" });
@@ -32,16 +34,17 @@ export default function LoginUpdatePopup({ enabled = true }) {
         if (!response.ok) throw new Error("Unable to load notifications.");
 
         if (!cancelled) {
-          setUpdates((Array.isArray(data.notifications) ? data.notifications : []).map((item) => {
+          setUpdates((Array.isArray(data.notifications) ? data.notifications : []).filter((item) => !item.is_read).map((item) => {
             const isAssignment = item.type === "assignment";
+            const isResult = item.type === "result";
             return {
               id: item.id,
-              type: isAssignment ? "homework" : "notice",
-              label: isAssignment ? "Assignment" : "Notice",
-              title: [item.title, item.message || item.body].filter(Boolean).join(" — ") || (isAssignment ? "New assignment" : "New notice"),
+              type: isAssignment ? "homework" : isResult ? "result" : "notice",
+              label: isAssignment ? "Assignment" : isResult ? "Result" : "Notice",
+              title: [item.title, item.message || item.body].filter(Boolean).join(" — ") || (isAssignment ? "New assignment" : isResult ? "New result" : "New notice"),
               meta: isAssignment
                 ? [item.status, formatNoticeDate(item.due_date)].filter(Boolean).join(" · ")
-                : formatNoticeDate(item.notice_date)
+                : formatNoticeDate(isResult ? item.assessment_date : item.notice_date)
             };
           }));
         }
@@ -56,6 +59,27 @@ export default function LoginUpdatePopup({ enabled = true }) {
 
   if (!enabled || !visible || updates.length === 0) return null;
 
+  const tickerCharacterCount = updates.reduce(
+    (total, update) => total + update.label.length + update.title.length + update.meta.length,
+    0
+  );
+  const tickerDuration = Math.max(75, Math.round(tickerCharacterCount * 0.24));
+
+  async function dismissUpdates() {
+    const notificationIds = updates.map((update) => update.id);
+    setVisible(false);
+    if (!studentIdentity || notificationIds.length === 0) return;
+    try {
+      await fetch(`${API_BASE_URL}/notifications/read`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: studentIdentity, notification_ids: notificationIds })
+      });
+    } catch {
+      // The popup remains dismissible even if read-state persistence temporarily fails.
+    }
+  }
+
   return (
     <section className="login-updates-ticker" aria-label="Latest student updates">
       <div className="login-updates-ticker-label">
@@ -64,7 +88,7 @@ export default function LoginUpdatePopup({ enabled = true }) {
       </div>
 
       <div className="login-updates-ticker-window">
-        <div className="login-updates-ticker-track">
+        <div className="login-updates-ticker-track" style={{ "--login-update-duration": `${tickerDuration}s` }}>
           {[...updates, ...updates].map((update, index) => (
             <article className={`login-update-ticker-item ${update.type}`} key={`${update.id}-${index}`}>
               <span className="login-update-ticker-type">{update.label}</span>
@@ -75,7 +99,7 @@ export default function LoginUpdatePopup({ enabled = true }) {
         </div>
       </div>
 
-      <button className="login-updates-ticker-close" type="button" aria-label="Hide latest updates" onClick={() => setVisible(false)}>&times;</button>
+      <button className="login-updates-ticker-close" type="button" aria-label="Hide latest updates" onClick={dismissUpdates}>&times;</button>
     </section>
   );
 }

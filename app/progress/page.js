@@ -16,6 +16,11 @@ function score(value) {
   return value == null ? "-" : Number(value).toLocaleString("en-IN", { maximumFractionDigits: 2 });
 }
 
+function formatDate(value) {
+  if (!value) return "-";
+  return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value));
+}
+
 export default function ProgressPage() {
   const [identity, setIdentity] = useState("");
   const [report, setReport] = useState(null);
@@ -96,7 +101,7 @@ export default function ProgressPage() {
 
               <div className="progress-summary-grid">
                 <article className="progress-summary-card"><span>Subjects</span><strong>{summary.subject_count || 0}</strong><small>Subjects with marks records</small></article>
-                <article className="progress-summary-card"><span>CT Scores Recorded</span><strong>{summary.completed_ct_count || 0}</strong><small>PT 1–4 and weekly tests</small></article>
+                <article className="progress-summary-card"><span>Tests Completed</span><strong>{summary.completed_assessment_count || 0}</strong><small>PTs, CTs and weekly tests</small></article>
                 <article className="progress-summary-card positive"><span>Strongest Subject</span><strong>{summary.strongest_subject || "-"}</strong><small>Highest current average</small></article>
                 <article className="progress-summary-card attention"><span>Needs Attention</span><strong>{summary.improvement_subject || "-"}</strong><small>Lowest current average</small></article>
               </div>
@@ -104,23 +109,25 @@ export default function ProgressPage() {
               {subjects.length === 0 ? <div className="analysis-state">No marks are available for the selected period.</div> : (
                 <div className="progress-report-grid">
                   <article className="module-card progress-history-card">
-                    <div className="progress-card-heading"><div><h2>Continuous Test Progress</h2><p>Scores entered in PT 1–4 and Weekly Test</p></div></div>
-                    {summary.completed_ct_count === 0 && <div className="progress-info-note">CT marks have not been entered yet. Exam marks are used for overall progress until CT scores are available.</div>}
+                    <div className="progress-card-heading"><div><h2>Assessment Progress</h2><p>Subject-wise PT, CT and Weekly Test results</p></div></div>
                     <div className="progress-history-table-wrap">
                       <table className="data-table progress-ct-table">
-                        <thead><tr><th>Subject</th><th>PT 1</th><th>PT 2</th><th>PT 3</th><th>PT 4</th><th>Weekly Test</th><th>Average</th></tr></thead>
-                        <tbody>{subjects.map((subject) => <tr key={subject.subject_id || subject.subject_name}>
+                        <thead><tr><th>Subject</th><th>Test Type</th><th>Assessment</th><th>Date</th><th>Marks</th><th>Result</th></tr></thead>
+                        <tbody>{subjects.flatMap((subject) => subject.assessments.map((assessment) => <tr key={assessment.assessment_id}>
                           <td><strong>{subject.subject_name}</strong></td>
-                          {subject.tests.map((test) => <td key={test.key}><span>{score(test.marks)}</span>{test.percentage != null && <small>{percentage(test.percentage)}</small>}</td>)}
-                          <td><span className="status-pill completed">{percentage(subject.ct_average ?? subject.exam_average)}</span></td>
-                        </tr>)}</tbody>
+                          <td>{assessment.exam_type}</td>
+                          <td>{assessment.title}</td>
+                          <td>{formatDate(assessment.assessment_date)}</td>
+                          <td>{assessment.is_absent ? "Absent" : `${score(assessment.marks_obtained)} / ${score(assessment.max_marks)}`}</td>
+                          <td><span className={`status-pill ${assessment.is_absent ? "pending" : "completed"}`}>{assessment.is_absent ? "Absent" : percentage(assessment.percentage)}</span></td>
+                        </tr>))}</tbody>
                       </table>
                     </div>
                   </article>
 
                   <article className="module-card progress-subject-card">
                     <h2>Subject-wise Progress</h2>
-                    <div className="progress-subject-list">{subjects.map((subject) => <div className="progress-subject-row" key={subject.subject_id || subject.subject_name}>
+                    <div className="progress-subject-list">{subjects.map((subject) => <div className="progress-subject-row" key={subject.subject_name}>
                       <div><strong>{subject.subject_name}</strong><span>{percentage(subject.overall_percentage)}</span></div>
                       <div className="progress-track"><i style={{ width: `${Math.min(100, Number(subject.overall_percentage) || 0)}%` }} /></div>
                     </div>)}</div>

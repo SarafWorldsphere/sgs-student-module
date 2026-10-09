@@ -131,6 +131,11 @@ class AssignmentSubmissionInput(BaseModel):
     file_content_base64: str = Field(..., min_length=1)
 
 
+class NotificationReadInput(BaseModel):
+    email: str = Field(..., min_length=3, max_length=150)
+    notification_ids: list[str] = Field(default_factory=list, max_length=100)
+
+
 def get_database_url() -> str:
     database_url = (os.getenv("DATABASE_URL") or "").strip()
     if not database_url:
@@ -1138,6 +1143,32 @@ def get_notifications(email: str = Query(..., min_length=3, max_length=150)):
             notice_id DESC
         LIMIT 10;
     """
+    results_query = """
+        SELECT
+            assessment.assessment_id,
+            assessment.title,
+            assessment.assessment_type,
+            assessment.assessment_date,
+            assessment.subject,
+            assessment.max_marks,
+            result.marks_obtained,
+            result.percentage,
+            COALESCE(result.is_absent, false) AS is_absent
+        FROM sgs_assessment_results result
+        INNER JOIN sgs_assessments assessment
+          ON assessment.assessment_id = result.assessment_id
+        WHERE result.student_id = %s
+          AND COALESCE(result.record_status, 'Active') = 'Active'
+          AND COALESCE(assessment.record_status, 'Active') = 'Active'
+        ORDER BY assessment.assessment_date DESC NULLS LAST, assessment.assessment_id DESC
+        LIMIT 10;
+    """
+    read_status_query = """
+        SELECT notification_type, source_id
+        FROM sgs_student_notification_status
+        WHERE student_id = %s
+          AND read_at IS NOT NULL;
+    """
 
     try:
         with get_connection() as connection:
@@ -1152,6 +1183,13 @@ def get_notifications(email: str = Query(..., min_length=3, max_length=150)):
 
                 cursor.execute(notices_query, (student["class_name"],))
                 notice_rows = cursor.fetchall()
+                cursor.execute(results_query, (student["student_id"],))
+                result_rows = cursor.fetchall()
+                cursor.execute(read_status_query, (student["student_id"],))
+                read_notification_keys = {
+                    (row["notification_type"], int(row["source_id"]))
+                    for row in cursor.fetchall()
+                }
     except HTTPException:
         raise
     except psycopg.errors.UndefinedTable as error:
@@ -1170,6 +1208,7 @@ def get_notifications(email: str = Query(..., min_length=3, max_length=150)):
                 "type": "assignment",
                 "id": f"assignment-{row['assignment_id']}",
                 "assignment_id": row["assignment_id"],
+                "source_id": row["assignment_id"],
                 "title": row.get("assignment_title") or "Assignment",
                 "body": row.get("assignment_text") or "",
                 "due_date": row.get("due_date"),
@@ -1182,6 +1221,7 @@ def get_notifications(email: str = Query(..., min_length=3, max_length=150)):
                 "priority": status["priority"],
                 "days_left": status["days_left"],
                 "is_countable": status["is_countable"],
+                "is_read": ("assignment", int(row["assignment_id"])) in read_notification_keys,
             }
         )
 
@@ -1197,27 +1237,87 @@ def get_notifications(email: str = Query(..., min_length=3, max_length=150)):
             "type": "notice",
             "id": f"notice-{notice['notice_id']}",
             "notice_id": notice["notice_id"],
+            "source_id": notice["notice_id"],
             "title": notice.get("notice_title") or "Notice",
             "message": notice.get("notice_text") or "-",
             "notice_date": notice.get("notice_date"),
             "applicable_class": notice.get("applicable_class") or "All",
-            "is_read": bool(notice.get("is_read")),
+            "is_read": ("notice", int(notice["notice_id"])) in read_notification_keys,
             "priority": "low",
             "is_countable": not bool(notice.get("is_read")),
         }
         for notice in notice_rows
     ]
-    notifications = [*assignments, *notices]
-    count = sum(1 for item in notifications if item.get("is_countable"))
+    results = [
+        {
+            "type": "result",
+            "id": f"result-{result['assessment_id']}",
+            "source_id": result["assessment_id"],
+            "assessment_id": result["assessment_id"],
+            "title": result.get("title") or result.get("assessment_type") or "Assessment Result",
+            "message": "Absent" if result.get("is_absent") else f"Score: {float(result.get('marks_obtained') or 0):g} / {float(result.get('max_marks') or 0):g}",
+            "assessment_type": result.get("assessment_type"),
+            "assessment_date": result.get("assessment_date"),
+            "subject": result.get("subject"),
+            "percentage": None if result.get("is_absent") else float(result.get("percentage") or 0),
+            "is_absent": bool(result.get("is_absent")),
+            "is_read": ("result", int(result["assessment_id"])) in read_notification_keys,
+            "priority": "low",
+            "is_countable": True,
+        }
+        for result in result_rows
+    ]
+    notifications = [*assignments, *notices, *results]
+    count = sum(1 for item in notifications if item.get("is_countable") and not item.get("is_read"))
 
     return {
         "student": student,
         "count": count,
         "assignments": assignments,
         "notices": notices,
+        "results": results,
         "notifications": notifications,
         "assignment_alert_error": assignment_alert_error,
     }
+
+
+@app.post("/notifications/read")
+def mark_notifications_read(payload: NotificationReadInput):
+    student = fetch_current_student_record(payload.email)
+    parsed_notifications = []
+    for notification_id in payload.notification_ids:
+        notification_type, separator, source_id = notification_id.partition("-")
+        if separator and notification_type in {"notice", "assignment", "result"} and source_id.isdigit():
+            parsed_notifications.append((notification_type, int(source_id)))
+
+    if not parsed_notifications:
+        return {"marked_read": 0}
+
+    query = """
+        INSERT INTO sgs_student_notification_status (
+            student_id,
+            notification_type,
+            source_id,
+            first_seen_at,
+            read_at
+        )
+        VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT (student_id, notification_type, source_id)
+        DO UPDATE SET read_at = CURRENT_TIMESTAMP;
+    """
+    try:
+        with get_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.executemany(
+                    query,
+                    [(student["student_id"], notification_type, source_id) for notification_type, source_id in parsed_notifications],
+                )
+    except psycopg.errors.UndefinedTable as error:
+        raise HTTPException(status_code=500, detail="Student notification status table is missing. Run migration 004.") from error
+    except psycopg.Error as error:
+        raise HTTPException(status_code=500, detail="Unable to update notification read status.") from error
+
+    return {"marked_read": len(parsed_notifications)}
 
 
 @app.get("/help-support")
@@ -1852,10 +1952,17 @@ def calculate_performance_summary(student_id: int) -> dict:
                   AND COALESCE(completed_flag, true) = true
             ) AS retry_count,
             (
-                SELECT AVG((marks_obtained / NULLIF(max_marks, 0)) * 100)
-                FROM sgs_student_marks
-                WHERE student_id = %(student_id)s
-                  AND COALESCE(record_status, 'Active') = 'Active'
+                SELECT AVG(COALESCE(
+                    result.percentage,
+                    (result.marks_obtained / NULLIF(assessment.max_marks, 0)) * 100
+                ))
+                FROM sgs_assessment_results result
+                INNER JOIN sgs_assessments assessment
+                  ON assessment.assessment_id = result.assessment_id
+                WHERE result.student_id = %(student_id)s
+                  AND COALESCE(result.record_status, 'Active') = 'Active'
+                  AND COALESCE(assessment.record_status, 'Active') = 'Active'
+                  AND COALESCE(result.is_absent, false) = false
             ) AS unit_test_marks;
     """
 
@@ -1867,7 +1974,7 @@ def calculate_performance_summary(student_id: int) -> dict:
     except psycopg.errors.UndefinedTable as error:
         raise HTTPException(
             status_code=500,
-            detail="Performance tables are missing. Confirm sgs_assignment_results, sgs_quiz_response, and sgs_student_marks exist.",
+            detail="Performance tables are missing. Confirm assignment, quiz, assessment, and assessment result tables exist.",
         ) from error
     except psycopg.Error as error:
         raise HTTPException(status_code=500, detail="Unable to fetch performance summary.") from error
@@ -1885,15 +1992,6 @@ def calculate_performance_summary(student_id: int) -> dict:
         **metrics,
         "classification": classification,
     }
-
-
-PROGRESS_TESTS = (
-    ("pt1", "PT 1"),
-    ("pt2", "PT 2"),
-    ("pt3", "PT 3"),
-    ("pt4", "PT 4"),
-    ("weekly_test", "Weekly Test"),
-)
 
 
 def _progress_percentage(value, maximum):
@@ -1916,34 +2014,27 @@ def get_student_progress(
     academic_year: str | None = Query(default=None),
     month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
 ):
-    """Return month-filtered CT and overall progress for the logged-in student."""
+    """Return row-based assessment progress for the logged-in student."""
     student = fetch_current_student_record(email)
     query = """
         SELECT
-            marks.marks_id,
-            marks.exam_id,
-            exam.exam_name,
-            exam.exam_type,
-            exam.academic_year,
-            exam.start_date,
-            exam.end_date,
-            marks.subject_id,
-            COALESCE(NULLIF(BTRIM(subject.subject_name), ''), 'Subject ' || marks.subject_id::text) AS subject_name,
-            marks.marks_obtained,
-            marks.max_marks,
-            marks.grade,
-            marks.remarks,
-            marks.pt1,
-            marks.pt2,
-            marks.pt3,
-            marks.pt4,
-            marks.weekly_test
-        FROM sgs_student_marks marks
-        LEFT JOIN sgs_exam_master exam ON exam.exam_id = marks.exam_id
-        LEFT JOIN sgs_subject_master subject ON subject.subject_id = marks.subject_id
-        WHERE marks.student_id = %s
-          AND COALESCE(marks.record_status, 'Active') = 'Active'
-        ORDER BY exam.start_date, subject.subject_name, marks.marks_id;
+            assessment.assessment_id,
+            assessment.title,
+            assessment.assessment_type AS exam_type,
+            assessment.assessment_date,
+            assessment.max_marks,
+            BTRIM(assessment.subject) AS subject_name,
+            result.marks_obtained,
+            result.percentage,
+            COALESCE(result.is_absent, false) AS is_absent
+        FROM sgs_assessment_results result
+        INNER JOIN sgs_assessments assessment
+          ON assessment.assessment_id = result.assessment_id
+        WHERE result.student_id = %s
+          AND COALESCE(result.record_status, 'Active') = 'Active'
+          AND COALESCE(assessment.record_status, 'Active') = 'Active'
+          AND NULLIF(BTRIM(assessment.subject), '') IS NOT NULL
+        ORDER BY assessment.assessment_date, assessment.assessment_id;
     """
     try:
         with get_connection() as connection:
@@ -1951,74 +2042,65 @@ def get_student_progress(
                 cursor.execute(query, (student["student_id"],))
                 rows = list(cursor.fetchall())
     except psycopg.errors.UndefinedTable as error:
-        raise HTTPException(status_code=500, detail="Student marks, exam master, or subject master table is missing.") from error
+        raise HTTPException(status_code=500, detail="Assessment or assessment result table is missing.") from error
     except psycopg.Error as error:
         logger.exception("Unable to fetch student progress")
         raise HTTPException(status_code=500, detail="Unable to fetch student progress.") from error
 
-    academic_years = sorted(
-        {str(row["academic_year"]).strip() for row in rows if row.get("academic_year")},
-        reverse=True,
-    )
+    def row_academic_year(row):
+        assessment_date = row.get("assessment_date")
+        if not assessment_date:
+            return None
+        start_year = assessment_date.year if assessment_date.month >= 4 else assessment_date.year - 1
+        return f"{start_year}-{str(start_year + 1)[-2:]}"
+
+    academic_years = sorted({row_academic_year(row) for row in rows if row_academic_year(row)}, reverse=True)
     selected_year = academic_year or (academic_years[0] if academic_years else None)
-    year_rows = [row for row in rows if selected_year is None or str(row.get("academic_year") or "") == selected_year]
+    year_rows = [row for row in rows if selected_year is None or row_academic_year(row) == selected_year]
 
     month_values = sorted(
-        {row["start_date"].strftime("%Y-%m") for row in year_rows if row.get("start_date")},
+        {row["assessment_date"].strftime("%Y-%m") for row in year_rows if row.get("assessment_date")},
         reverse=True,
     )
     filtered_rows = [
         row for row in year_rows
-        if month is None or (row.get("start_date") and row["start_date"].strftime("%Y-%m") == month)
+        if month is None or (row.get("assessment_date") and row["assessment_date"].strftime("%Y-%m") == month)
     ]
 
     subject_groups = {}
-    completed_ct_count = 0
     for row in filtered_rows:
-        subject_key = str(row.get("subject_id") or row["subject_name"])
+        subject_key = row["subject_name"].lower()
         group = subject_groups.setdefault(subject_key, {
-            "subject_id": row.get("subject_id"),
             "subject_name": row["subject_name"],
-            "tests": {key: [] for key, _ in PROGRESS_TESTS},
-            "exam_percentages": [],
-            "grades": [],
-            "remarks": [],
+            "assessments": [],
+            "percentages": [],
         })
-        for key, _label in PROGRESS_TESTS:
-            percentage = _progress_percentage(row.get(key), row.get("max_marks"))
-            if percentage is not None:
-                group["tests"][key].append({"marks": float(row[key]), "percentage": percentage})
-                completed_ct_count += 1
-        exam_percentage = _progress_percentage(row.get("marks_obtained"), row.get("max_marks"))
-        if exam_percentage is not None:
-            group["exam_percentages"].append(exam_percentage)
-        if row.get("grade"):
-            group["grades"].append(str(row["grade"]))
-        if row.get("remarks"):
-            group["remarks"].append(str(row["remarks"]))
+        is_absent = bool(row.get("is_absent"))
+        calculated_percentage = None if is_absent else (
+            round(float(row["percentage"]), 2)
+            if row.get("percentage") is not None
+            else _progress_percentage(row.get("marks_obtained"), row.get("max_marks"))
+        )
+        assessment = {
+            "assessment_id": row["assessment_id"],
+            "title": row.get("title") or row.get("exam_type") or "Assessment",
+            "exam_type": row.get("exam_type") or "Assessment",
+            "assessment_date": row["assessment_date"].isoformat() if row.get("assessment_date") else None,
+            "marks_obtained": None if is_absent or row.get("marks_obtained") is None else float(row["marks_obtained"]),
+            "max_marks": float(row.get("max_marks") or 0),
+            "percentage": calculated_percentage,
+            "is_absent": is_absent,
+        }
+        group["assessments"].append(assessment)
+        if calculated_percentage is not None:
+            group["percentages"].append(calculated_percentage)
 
     subjects = []
     for group in subject_groups.values():
-        tests = []
-        ct_percentages = []
-        for key, label in PROGRESS_TESTS:
-            entries = group["tests"][key]
-            test_percentage = _average(entry["percentage"] for entry in entries)
-            test_marks = _average(entry["marks"] for entry in entries)
-            tests.append({"key": key, "label": label, "marks": test_marks, "percentage": test_percentage})
-            if test_percentage is not None:
-                ct_percentages.append(test_percentage)
-        ct_average = _average(ct_percentages)
-        exam_average = _average(group["exam_percentages"])
         subjects.append({
-            "subject_id": group["subject_id"],
             "subject_name": group["subject_name"],
-            "tests": tests,
-            "ct_average": ct_average,
-            "exam_average": exam_average,
-            "overall_percentage": ct_average if ct_average is not None else exam_average,
-            "grade": group["grades"][-1] if group["grades"] else None,
-            "remarks": group["remarks"][-1] if group["remarks"] else None,
+            "assessments": group["assessments"],
+            "overall_percentage": _average(group["percentages"]),
         })
     subjects.sort(key=lambda item: item["subject_name"].lower())
 
@@ -2030,12 +2112,11 @@ def get_student_progress(
     for month_value in sorted(month_values):
         percentages = []
         for row in year_rows:
-            if not row.get("start_date") or row["start_date"].strftime("%Y-%m") != month_value:
+            if not row.get("assessment_date") or row["assessment_date"].strftime("%Y-%m") != month_value:
                 continue
-            ct_values = [_progress_percentage(row.get(key), row.get("max_marks")) for key, _ in PROGRESS_TESTS]
-            row_average = _average(ct_values)
-            if row_average is None:
-                row_average = _progress_percentage(row.get("marks_obtained"), row.get("max_marks"))
+            if row.get("is_absent"):
+                continue
+            row_average = round(float(row["percentage"]), 2) if row.get("percentage") is not None else _progress_percentage(row.get("marks_obtained"), row.get("max_marks"))
             if row_average is not None:
                 percentages.append(row_average)
         month_date = datetime.strptime(month_value, "%Y-%m")
@@ -2059,7 +2140,7 @@ def get_student_progress(
         "summary": {
             "overall_average": _average(subject["overall_percentage"] for subject in subjects),
             "subject_count": len(subjects),
-            "completed_ct_count": completed_ct_count,
+            "completed_assessment_count": sum(1 for row in filtered_rows if not row.get("is_absent") and row.get("marks_obtained") is not None),
             "strongest_subject": strongest["subject_name"] if strongest else None,
             "improvement_subject": improvement["subject_name"] if improvement else None,
         },

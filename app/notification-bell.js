@@ -41,6 +41,7 @@ export default function NotificationBell() {
   const [error, setError] = useState("");
   const [assignmentAlertError, setAssignmentAlertError] = useState("");
   const storageKeyRef = useRef("");
+  const studentIdentityRef = useRef("");
 
   useEffect(() => {
     let cancelled = false;
@@ -51,6 +52,7 @@ export default function NotificationBell() {
       try {
         const email = await getLoggedInUserEmail();
         if (!email) throw new Error("Logged-in student email is unavailable.");
+        studentIdentityRef.current = email;
         storageKeyRef.current = `sgs-read-notifications:${email.toLowerCase()}`;
         const storedIds = JSON.parse(window.localStorage.getItem(storageKeyRef.current) || "[]");
         const readIds = new Set(Array.isArray(storedIds) ? storedIds : []);
@@ -95,6 +97,13 @@ export default function NotificationBell() {
         window.localStorage.setItem(storageKeyRef.current, JSON.stringify(readIds));
         setNotifications((items) => items.map((item) => ({ ...item, unread: false })));
         setCount(0);
+        if (studentIdentityRef.current && readIds.length > 0) {
+          fetch(`${API_BASE_URL}/notifications/read`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: studentIdentityRef.current, notification_ids: readIds })
+          }).catch(() => {});
+        }
       }
       return nextOpen;
     });
@@ -138,15 +147,18 @@ export default function NotificationBell() {
 
           {!error && notifications.map((item) => {
             const isAssignment = item.type === "assignment";
-            const itemDate = isAssignment ? item.due_date : item.notice_date;
+            const isResult = item.type === "result";
+            const itemDate = isAssignment ? item.due_date : isResult ? item.assessment_date : item.notice_date;
             const meta = isAssignment
               ? [item.subject_name, item.chapter_name].filter(Boolean).join(" - ") || "Assignment"
-              : item.applicable_class || "All";
+              : isResult
+                ? [item.subject, item.assessment_type].filter(Boolean).join(" - ") || "Result"
+                : item.applicable_class || "All";
 
             return (
               <article className={`notice-item ${item.unread ? "unread" : ""} ${isAssignment ? "assignment-alert" : ""}`} key={item.id}>
                 <div>
-                  <strong>{item.title || (isAssignment ? "Assignment" : "Notice")}</strong>
+                  <strong>{item.title || (isAssignment ? "Assignment" : isResult ? "Result" : "Notice")}</strong>
                   <time>{formatNoticeDate(itemDate)}</time>
                 </div>
                 <p>{item.message || item.body || "-"}</p>
