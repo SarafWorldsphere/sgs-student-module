@@ -1185,11 +1185,18 @@ def get_notifications(email: str = Query(..., min_length=3, max_length=150)):
                 notice_rows = cursor.fetchall()
                 cursor.execute(results_query, (student["student_id"],))
                 result_rows = cursor.fetchall()
-                cursor.execute(read_status_query, (student["student_id"],))
-                read_notification_keys = {
-                    (row["notification_type"], int(row["source_id"]))
-                    for row in cursor.fetchall()
-                }
+                try:
+                    cursor.execute(read_status_query, (student["student_id"],))
+                    read_notification_keys = {
+                        (row["notification_type"], int(row["source_id"]))
+                        for row in cursor.fetchall()
+                    }
+                except psycopg.errors.UndefinedTable:
+                    # Keep notifications visible during a rolling deployment if
+                    # migration 004 has not reached the database yet. Read-state
+                    # persistence becomes active as soon as the table exists.
+                    connection.rollback()
+                    read_notification_keys = set()
     except HTTPException:
         raise
     except psycopg.errors.UndefinedTable as error:

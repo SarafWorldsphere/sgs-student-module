@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import * as Accordion from "@radix-ui/react-accordion";
 import { withoutBasePath } from "./base-path";
 
@@ -79,13 +80,20 @@ export default function StudyTabs({ onAssessmentViewChange, onAssignmentViewChan
   const pathname = usePathname();
   const currentPath = withoutBasePath(pathname);
   const activeIndex = studyTabs.findIndex((tab) => currentPath === tab.href || currentPath.startsWith(`${tab.href}/`));
+  const activePanel = activeIndex >= 0 ? `panel-${activeIndex}` : "";
+  const [openPanel, setOpenPanel] = useState(activePanel);
+
+  useEffect(() => {
+    setOpenPanel(activePanel);
+  }, [activePanel]);
 
   return (
     <Accordion.Root
       className="content-grid study-tab-strip"
       type="single"
       collapsible
-      defaultValue={activeIndex >= 0 ? `panel-${activeIndex}` : undefined}
+      value={openPanel}
+      onValueChange={setOpenPanel}
       aria-label="Study modules"
     >
       {studyTabs.map((tab, index) => (
@@ -127,7 +135,7 @@ export default function StudyTabs({ onAssessmentViewChange, onAssignmentViewChan
                 }
 
                 return (
-                  <Link className="study-row" href={href} key={label}>
+                  <Link className="study-row" href={href} prefetch={false} key={label}>
                     <span>{label}</span>
                   </Link>
                 );
