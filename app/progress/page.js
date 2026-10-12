@@ -74,6 +74,7 @@ export default function ProgressPage() {
   const subjects = report?.subjects || [];
   const yearOptions = (filters.academic_years || []).map((value) => ({ value, label: value }));
   const periodOptions = [{ value: "overall", label: "Overall Academic Progress" }, ...(filters.months || [])];
+  const isMonthlyView = period !== "overall";
 
   function changeYear(value) {
     setAcademicYear(value);
@@ -90,7 +91,7 @@ export default function ProgressPage() {
             <>
               <header className="progress-report-header">
                 <div><span className="progress-report-kicker">Student Progress</span><h1>{report.student.full_name}&apos;s Progress Report</h1><p>Monthly CT performance and overall academic progress.</p></div>
-                <div className="progress-overall-score"><strong>{percentage(summary.overall_average)}</strong><span>Overall Average</span></div>
+                <div className="progress-overall-score"><strong>{percentage(summary.overall_average)}</strong><span>{isMonthlyView ? "Monthly CT Progress" : "Overall Average"}</span></div>
               </header>
 
               <div className="progress-filter-bar">
@@ -101,7 +102,7 @@ export default function ProgressPage() {
 
               <div className="progress-summary-grid">
                 <article className="progress-summary-card"><span>Subjects</span><strong>{summary.subject_count || 0}</strong><small>Subjects with marks records</small></article>
-                <article className="progress-summary-card"><span>Tests Completed</span><strong>{summary.completed_assessment_count || 0}</strong><small>PTs, CTs and weekly tests</small></article>
+                <article className="progress-summary-card"><span>Tests Completed</span><strong>{summary.completed_assessment_count || 0}</strong><small>{isMonthlyView ? "Weekly tests / CTs" : "PTs, CTs and academic exams"}</small></article>
                 <article className="progress-summary-card positive"><span>Strongest Subject</span><strong>{summary.strongest_subject || "-"}</strong><small>Highest current average</small></article>
                 <article className="progress-summary-card attention"><span>Needs Attention</span><strong>{summary.improvement_subject || "-"}</strong><small>Lowest current average</small></article>
               </div>
@@ -109,7 +110,7 @@ export default function ProgressPage() {
               {subjects.length === 0 ? <div className="analysis-state">No marks are available for the selected period.</div> : (
                 <div className="progress-report-grid">
                   <article className="module-card progress-history-card">
-                    <div className="progress-card-heading"><div><h2>Assessment Progress</h2><p>Subject-wise PT, CT and Weekly Test results</p></div></div>
+                    <div className="progress-card-heading"><div><h2>{isMonthlyView ? "Monthly CT Progress" : "Academic Progress"}</h2><p>{isMonthlyView ? "Subject-wise weekly test / CT results" : "Subject-wise PT, CT and academic exam results"}</p></div></div>
                     <div className="progress-history-table-wrap">
                       <table className="data-table progress-ct-table">
                         <thead><tr><th>Subject</th><th>Test Type</th><th>Assessment</th><th>Date</th><th>Marks</th><th>Result</th></tr></thead>
@@ -135,7 +136,7 @@ export default function ProgressPage() {
 
                   <article className="module-card progress-latest-card">
                     <h2>Monthly Progress</h2>
-                    {(report.monthly_progress || []).length ? <div className="progress-month-list">{report.monthly_progress.map((item) => <div key={item.month}><span>{item.label}</span><strong>{percentage(item.average_percentage)}</strong></div>)}</div> : <p>No monthly marks are available.</p>}
+                    {(report.monthly_progress || []).length ? <div className="progress-month-list">{report.monthly_progress.map((item) => <div key={item.month}><span>{item.label}<small>{score(item.marks_obtained)} / {score(item.max_marks)}</small></span><strong>{percentage(item.average_percentage)}</strong></div>)}</div> : <p>No monthly CT marks are available.</p>}
                   </article>
                 </div>
               )}

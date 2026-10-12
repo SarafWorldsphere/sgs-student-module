@@ -239,7 +239,7 @@ function DashboardShellFrame({ children }) {
 
         <nav className="nav-list" aria-label="Student navigation">
           {navItems.map(([icon, label, href]) => (
-            <Link className={`nav-item ${isActive(href) ? "active" : ""}`} href={href} key={label} onClick={() => setIsMobileMenuOpen(false)}>
+            <Link className={`nav-item ${isActive(href) ? "active" : ""}`} href={href} prefetch={false} key={label} onClick={() => setIsMobileMenuOpen(false)}>
               <Icon name={icon} />
               <span>{label}</span>
             </Link>
@@ -250,7 +250,7 @@ function DashboardShellFrame({ children }) {
 
         <nav className="nav-list compact" aria-label="Settings navigation">
           {settingsItems.map(([icon, label, href]) => (
-            <Link className={`nav-item ${isActive(href) ? "active" : ""}`} href={href} key={label} onClick={() => setIsMobileMenuOpen(false)}>
+            <Link className={`nav-item ${isActive(href) ? "active" : ""}`} href={href} prefetch={false} key={label} onClick={() => setIsMobileMenuOpen(false)}>
               <Icon name={icon} />
               <span>{label}</span>
             </Link>
