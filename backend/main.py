@@ -2015,6 +2015,16 @@ def _average(values):
     return round(sum(available) / len(available), 2) if available else None
 
 
+def _weighted_progress(rows):
+    scored_rows = [
+        row for row in rows
+        if float(row.get("max_marks") or 0) > 0
+    ]
+    obtained = sum(float(row.get("marks_obtained") or 0) for row in scored_rows)
+    maximum = sum(float(row["max_marks"]) for row in scored_rows)
+    return obtained, maximum, _progress_percentage(obtained, maximum) if maximum else None
+
+
 @app.get("/student-progress")
 def get_student_progress(
     email: str = Query(..., min_length=1),
@@ -2027,17 +2037,24 @@ def get_student_progress(
         SELECT
             assessment.assessment_id,
             assessment.title,
-            assessment.assessment_type AS exam_type,
+            assessment.assessment_type,
             assessment.assessment_date,
             assessment.max_marks,
+            assessment.class_id,
+            assessment.exam_id,
             BTRIM(assessment.subject) AS subject_name,
+            exam.exam_name,
+            exam.academic_year AS exam_academic_year,
             result.marks_obtained,
             result.percentage,
             COALESCE(result.is_absent, false) AS is_absent
         FROM sgs_assessment_results result
         INNER JOIN sgs_assessments assessment
           ON assessment.assessment_id = result.assessment_id
+        LEFT JOIN sgs_exam_master exam
+          ON exam.exam_id = assessment.exam_id
         WHERE result.student_id = %s
+          AND (assessment.class_id = %s OR assessment.class_id IS NULL)
           AND COALESCE(result.record_status, 'Active') = 'Active'
           AND COALESCE(assessment.record_status, 'Active') = 'Active'
           AND NULLIF(BTRIM(assessment.subject), '') IS NOT NULL
@@ -2046,7 +2063,7 @@ def get_student_progress(
     try:
         with get_connection() as connection:
             with connection.cursor(row_factory=dict_row) as cursor:
-                cursor.execute(query, (student["student_id"],))
+                cursor.execute(query, (student["student_id"], student.get("class_id")))
                 rows = list(cursor.fetchall())
     except psycopg.errors.UndefinedTable as error:
         raise HTTPException(status_code=500, detail="Assessment or assessment result table is missing.") from error
@@ -2055,6 +2072,8 @@ def get_student_progress(
         raise HTTPException(status_code=500, detail="Unable to fetch student progress.") from error
 
     def row_academic_year(row):
+        if row.get("exam_academic_year"):
+            return row["exam_academic_year"]
         assessment_date = row.get("assessment_date")
         if not assessment_date:
             return None
@@ -2066,12 +2085,20 @@ def get_student_progress(
     year_rows = [row for row in rows if selected_year is None or row_academic_year(row) == selected_year]
 
     month_values = sorted(
-        {row["assessment_date"].strftime("%Y-%m") for row in year_rows if row.get("assessment_date")},
+        {
+            row["assessment_date"].strftime("%Y-%m")
+            for row in year_rows
+            if row.get("assessment_date") and row.get("exam_id") is None
+        },
         reverse=True,
     )
     filtered_rows = [
         row for row in year_rows
-        if month is None or (row.get("assessment_date") and row["assessment_date"].strftime("%Y-%m") == month)
+        if month is None or (
+            row.get("exam_id") is None
+            and row.get("assessment_date")
+            and row["assessment_date"].strftime("%Y-%m") == month
+        )
     ]
 
     subject_groups = {}
@@ -2080,7 +2107,7 @@ def get_student_progress(
         group = subject_groups.setdefault(subject_key, {
             "subject_name": row["subject_name"],
             "assessments": [],
-            "percentages": [],
+            "rows": [],
         })
         is_absent = bool(row.get("is_absent"))
         calculated_percentage = None if is_absent else (
@@ -2090,8 +2117,9 @@ def get_student_progress(
         )
         assessment = {
             "assessment_id": row["assessment_id"],
-            "title": row.get("title") or row.get("exam_type") or "Assessment",
-            "exam_type": row.get("exam_type") or "Assessment",
+            "title": row.get("title") or row.get("exam_name") or "Assessment",
+            "exam_type": row.get("exam_name") or "Weekly Test (CT)",
+            "exam_id": row.get("exam_id"),
             "assessment_date": row["assessment_date"].isoformat() if row.get("assessment_date") else None,
             "marks_obtained": None if is_absent or row.get("marks_obtained") is None else float(row["marks_obtained"]),
             "max_marks": float(row.get("max_marks") or 0),
@@ -2099,15 +2127,17 @@ def get_student_progress(
             "is_absent": is_absent,
         }
         group["assessments"].append(assessment)
-        if calculated_percentage is not None:
-            group["percentages"].append(calculated_percentage)
+        group["rows"].append(row)
 
     subjects = []
     for group in subject_groups.values():
+        subject_obtained, subject_maximum, subject_percentage = _weighted_progress(group["rows"])
         subjects.append({
             "subject_name": group["subject_name"],
             "assessments": group["assessments"],
-            "overall_percentage": _average(group["percentages"]),
+            "marks_obtained": subject_obtained,
+            "max_marks": subject_maximum,
+            "overall_percentage": subject_percentage,
         })
     subjects.sort(key=lambda item: item["subject_name"].lower())
 
@@ -2117,21 +2147,24 @@ def get_student_progress(
 
     monthly_progress = []
     for month_value in sorted(month_values):
-        percentages = []
-        for row in year_rows:
-            if not row.get("assessment_date") or row["assessment_date"].strftime("%Y-%m") != month_value:
-                continue
-            if row.get("is_absent"):
-                continue
-            row_average = round(float(row["percentage"]), 2) if row.get("percentage") is not None else _progress_percentage(row.get("marks_obtained"), row.get("max_marks"))
-            if row_average is not None:
-                percentages.append(row_average)
+        month_rows = [
+            row for row in year_rows
+            if row.get("exam_id") is None
+            and row.get("assessment_date")
+            and row["assessment_date"].strftime("%Y-%m") == month_value
+        ]
+        month_obtained, month_maximum, month_percentage = _weighted_progress(month_rows)
         month_date = datetime.strptime(month_value, "%Y-%m")
         monthly_progress.append({
             "month": month_value,
             "label": month_date.strftime("%B %Y"),
-            "average_percentage": _average(percentages),
+            "marks_obtained": month_obtained,
+            "max_marks": month_maximum,
+            "average_percentage": month_percentage,
+            "absent_count": sum(1 for row in month_rows if row.get("is_absent")),
         })
+
+    overall_obtained, overall_maximum, overall_percentage = _weighted_progress(filtered_rows)
 
     return {
         "student": student,
@@ -2145,7 +2178,9 @@ def get_student_progress(
             "selected_month": month,
         },
         "summary": {
-            "overall_average": _average(subject["overall_percentage"] for subject in subjects),
+            "overall_average": overall_percentage,
+            "marks_obtained": overall_obtained,
+            "max_marks": overall_maximum,
             "subject_count": len(subjects),
             "completed_assessment_count": sum(1 for row in filtered_rows if not row.get("is_absent") and row.get("marks_obtained") is not None),
             "strongest_subject": strongest["subject_name"] if strongest else None,
