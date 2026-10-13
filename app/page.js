@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import * as Accordion from "@radix-ui/react-accordion";
 
 const panels = [
@@ -9,11 +9,11 @@ const panels = [
     icon: "book-open",
     title: "Study A: Core Material",
     rows: [
-      ["book-open", "1) Chapters"],
-      ["document", "2) Study Material"],
-      ["question", "3) Quizzes"],
-      ["chart", "4) AI Learning Path"],
-      ["document", "5) AI Translator"]
+      ["book-open", "1) Chapters", "/chapters"],
+      ["document", "2) Study Material", "/study-material"],
+      ["question", "3) Quizzes", "/quizzes"],
+      ["chart", "4) AI Learning Path", "/ai-learning-path"],
+      ["document", "5) AI Translator", "/ai-translator"]
     ]
   },
   {
@@ -21,9 +21,9 @@ const panels = [
     icon: "clipboard",
     title: "Study B: Assignment",
     rows: [
-      ["clipboard", "1) My Assignments"],
-      ["upload", "2) Submit Assignment"],
-      ["star", "3) Feedback & Marks"]
+      ["clipboard", "1) My Assignments", "/assignments?view=materials"],
+      ["upload", "2) Submit Assignment", "/assignments?view=submit"],
+      ["star", "3) Feedback & Marks", "/assignments?view=feedback"]
     ]
   },
   {
@@ -31,10 +31,10 @@ const panels = [
     icon: "target",
     title: "Study C: Assessment",
     rows: [
-      ["monitor", "1) Mock Test"],
-      ["target", "2) Competitive Exams"],
-      ["chart", "3) Student Analysis"],
-      ["note", "4) Teacher Remark"]
+      ["monitor", "1) Mock Test", "/assessments?view=mock-test"],
+      ["target", "2) Competitive Exams", "/assessments?view=competitive-exams"],
+      ["chart", "3) Student Analysis", "/assessments?view=student-analysis"],
+      ["note", "4) Teacher Remark", "/assessments?view=teacher-remark"]
     ]
   }
 ];
@@ -71,7 +71,7 @@ function PanelIcon({ name }) {
 }
 
 function StudyPanel({ panel, index }) {
-  const isCoreMaterial = panel.title === "Study A: Core Material";
+  const router = useRouter();
 
   return (
     <Accordion.Item className={`study-panel ${panel.tone}`} value={`panel-${index}`}>
@@ -85,27 +85,11 @@ function StudyPanel({ panel, index }) {
       <div className="accent-line" />
       <Accordion.Content className="panel-content">
         <div className="panel-body">
-          {panel.rows.map(([icon, label]) => {
-            const coreLinks = {
-              "1) Chapters": "/chapters",
-              "2) Study Material": "/study-material",
-              "3) Quizzes": "/quizzes",
-              "4) AI Learning Path": "/ai-learning-path",
-              "5) AI Translator": "/ai-translator"
-            };
-            const assessmentLinks = {
-              "1) Mock Test": "/assessments?view=mock-test",
-              "2) Competitive Exams": "/assessments?view=competitive-exams",
-              "3) Student Analysis": "/assessments?view=student-analysis",
-              "4) Teacher Remark": "/assessments?view=teacher-remark"
-            };
-            const rowHref = isCoreMaterial ? coreLinks[label] : panel.tone === "orange" ? "/assignments" : panel.tone === "purple" ? assessmentLinks[label] : "#";
-            return (
-              <Link className="study-row" href={rowHref} prefetch={false} key={label}>
-                <span>{label}</span>
-              </Link>
-            );
-          })}
+          {panel.rows.map(([icon, label, href]) => (
+            <button className="study-row" type="button" key={label} onClick={() => router.push(href)}>
+              <span>{label}</span>
+            </button>
+          ))}
         </div>
       </Accordion.Content>
     </Accordion.Item>
