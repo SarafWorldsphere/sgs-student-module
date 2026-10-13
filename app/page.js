@@ -32,8 +32,9 @@ const panels = [
     title: "Study C: Assessment",
     rows: [
       ["monitor", "1) Mock Test"],
-      ["chart", "2) Student Analysis"],
-      ["note", "3) Teacher Remark"]
+      ["target", "2) Competitive Exams"],
+      ["chart", "3) Student Analysis"],
+      ["note", "4) Teacher Remark"]
     ]
   }
 ];
@@ -92,9 +93,15 @@ function StudyPanel({ panel, index }) {
               "4) AI Learning Path": "/ai-learning-path",
               "5) AI Translator": "/ai-translator"
             };
-            const rowHref = isCoreMaterial ? coreLinks[label] : panel.tone === "orange" ? "/assignments" : panel.tone === "purple" ? "/assessments" : "#";
+            const assessmentLinks = {
+              "1) Mock Test": "/assessments?view=mock-test",
+              "2) Competitive Exams": "/assessments?view=competitive-exams",
+              "3) Student Analysis": "/assessments?view=student-analysis",
+              "4) Teacher Remark": "/assessments?view=teacher-remark"
+            };
+            const rowHref = isCoreMaterial ? coreLinks[label] : panel.tone === "orange" ? "/assignments" : panel.tone === "purple" ? assessmentLinks[label] : "#";
             return (
-              <Link className="study-row" href={rowHref} key={label}>
+              <Link className="study-row" href={rowHref} prefetch={false} key={label}>
                 <span>{label}</span>
               </Link>
             );
