@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { getApiBaseUrl } from "./api-base-url";
 import { getLoggedInUserEmail } from "./login-session";
+import { loadStudentNotifications } from "./student-notifications";
 
 const API_BASE_URL = getApiBaseUrl();
 
@@ -17,21 +18,20 @@ export default function LoginUpdatePopup({ enabled = true }) {
   const [visible, setVisible] = useState(true);
   const [updates, setUpdates] = useState([]);
   const [studentIdentity, setStudentIdentity] = useState("");
+  const [loading, setLoading] = useState(enabled);
 
   useEffect(() => {
     if (!enabled) return undefined;
     let cancelled = false;
 
     async function loadNotifications() {
+      setLoading(true);
       try {
         const email = await getLoggedInUserEmail();
         if (!email) throw new Error("Logged-in student identity is unavailable.");
         if (!cancelled) setStudentIdentity(email);
 
-        const params = new URLSearchParams({ email });
-        const response = await fetch(`${API_BASE_URL}/notifications?${params.toString()}`, { cache: "no-store" });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error("Unable to load notifications.");
+        const data = await loadStudentNotifications(email);
 
         if (!cancelled) {
           setUpdates((Array.isArray(data.notifications) ? data.notifications : []).filter((item) => !item.is_read).map((item) => {
@@ -50,6 +50,8 @@ export default function LoginUpdatePopup({ enabled = true }) {
         }
       } catch {
         if (!cancelled) setUpdates([]);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     }
 
@@ -57,7 +59,7 @@ export default function LoginUpdatePopup({ enabled = true }) {
     return () => { cancelled = true; };
   }, [enabled]);
 
-  if (!enabled || !visible || updates.length === 0) return null;
+  if (!enabled || !visible || (!loading && updates.length === 0)) return null;
 
   const tickerCharacterCount = updates.reduce(
     (total, update) => total + update.label.length + update.title.length + update.meta.length,
@@ -88,15 +90,17 @@ export default function LoginUpdatePopup({ enabled = true }) {
       </div>
 
       <div className="login-updates-ticker-window">
-        <div className="login-updates-ticker-track" style={{ "--login-update-duration": `${tickerDuration}s` }}>
-          {[...updates, ...updates].map((update, index) => (
-            <article className={`login-update-ticker-item ${update.type}`} key={`${update.id}-${index}`}>
-              <span className="login-update-ticker-type">{update.label}</span>
-              <span className="login-update-ticker-title">{update.title}</span>
-              <time>{update.meta}</time>
-            </article>
-          ))}
-        </div>
+        {loading ? <div className="login-updates-ticker-loading" role="status">Loading latest updates...</div> : (
+          <div className="login-updates-ticker-track" style={{ "--login-update-duration": `${tickerDuration}s` }}>
+            {[...updates, ...updates].map((update, index) => (
+              <article className={`login-update-ticker-item ${update.type}`} key={`${update.id}-${index}`}>
+                <span className="login-update-ticker-type">{update.label}</span>
+                <span className="login-update-ticker-title">{update.title}</span>
+                <time>{update.meta}</time>
+              </article>
+            ))}
+          </div>
+        )}
       </div>
 
       <button className="login-updates-ticker-close" type="button" aria-label="Hide latest updates" onClick={dismissUpdates}>&times;</button>

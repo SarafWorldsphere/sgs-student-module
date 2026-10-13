@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getApiBaseUrl } from "./api-base-url";
 import { getLoggedInUserEmail } from "./login-session";
+import { loadStudentNotifications } from "./student-notifications";
 
 const API_BASE_URL = getApiBaseUrl();
 
@@ -56,12 +57,7 @@ export default function NotificationBell() {
         storageKeyRef.current = `sgs-read-notifications:${email.toLowerCase()}`;
         const storedIds = JSON.parse(window.localStorage.getItem(storageKeyRef.current) || "[]");
         const readIds = new Set(Array.isArray(storedIds) ? storedIds : []);
-        const response = await fetch(`${API_BASE_URL}/notifications?${new URLSearchParams({ email }).toString()}`);
-        const data = await response.json().catch(() => ({}));
-
-        if (!response.ok) {
-          throw new Error(typeof data.detail === "string" ? data.detail : "Unable to load notifications.");
-        }
+        const data = await loadStudentNotifications(email);
 
         if (!cancelled) {
           const nextNotifications = (Array.isArray(data.notifications) ? data.notifications : []).map((item) => ({

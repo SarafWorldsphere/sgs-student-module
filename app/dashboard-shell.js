@@ -307,7 +307,7 @@ function DashboardShellFrame({ children }) {
           </div>
         </header>
 
-        <LoginUpdatePopup enabled={currentPath === "/"} />
+        <LoginUpdatePopup />
 
         <LanguagePageTranslator />
         {children}
