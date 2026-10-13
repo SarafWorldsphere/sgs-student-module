@@ -347,6 +347,16 @@ button {
   will-change: transform;
 }
 
+.login-updates-ticker-loading {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  color: #b9c7e8;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .login-updates-ticker:hover .login-updates-ticker-track,
 .login-updates-ticker:focus-within .login-updates-ticker-track {
   animation-play-state: paused;
