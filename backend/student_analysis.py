@@ -12,10 +12,10 @@ def create_student_analysis_router(
     router = APIRouter()
 
     @router.get("/student-analysis")
-    def get_student_analysis(
+    async def get_student_analysis(
         email: str = Query(..., min_length=3, max_length=150),
     ):
-        student = fetch_current_student_record(email)
+        student = await fetch_current_student_record(email)
         query = """
             SELECT
                 assessment.title,
@@ -43,10 +43,10 @@ def create_student_analysis_router(
         """
 
         try:
-            with get_connection() as connection:
-                with connection.cursor(row_factory=dict_row) as cursor:
-                    cursor.execute(query, (student["student_id"],))
-                    rows = cursor.fetchall()
+            async with get_connection() as connection:
+                async with connection.cursor(row_factory=dict_row) as cursor:
+                    await cursor.execute(query, (student["student_id"],))
+                    rows = await cursor.fetchall()
         except psycopg.errors.UndefinedTable as error:
             raise HTTPException(status_code=500, detail="Assessment analysis tables are missing.") from error
         except psycopg.Error as error:
