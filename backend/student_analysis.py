@@ -31,8 +31,8 @@ def create_student_analysis_router(
                         ELSE 0
                     END
                 ) AS percentage
-            FROM sgs_assessment_results result
-            INNER JOIN sgs_assessments assessment
+            FROM assessment_results result
+            INNER JOIN assessments assessment
               ON assessment.assessment_id = result.assessment_id
             WHERE result.student_id = %s
               AND result.record_status = 'Active'

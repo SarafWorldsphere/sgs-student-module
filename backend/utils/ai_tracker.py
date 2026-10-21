@@ -65,7 +65,7 @@ async def log_ai_usage(
             async with connection.cursor() as cursor:
                 await cursor.execute(
                     """
-                    INSERT INTO sgs_ai_usage_logs (
+                    INSERT INTO ai_usage_logs (
                         client_name,
                         user_email,
                         module_name,
@@ -89,5 +89,5 @@ async def log_ai_usage(
             await connection.commit()
         return True
     except (psycopg.Error, PoolTimeout, RuntimeError, ValueError, TypeError) as error:
-        logger.warning("Unable to write sgs_ai_usage_logs: %s", error)
+        logger.warning("Unable to write ai_usage_logs: %s", error)
         return False

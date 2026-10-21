@@ -16,6 +16,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from psycopg_pool import PoolTimeout
 
+from saraswati_tenant import School, school_context, set_school_lookup
 import database
 import main
 import pool_psycopg
@@ -56,11 +57,21 @@ class FakePool:
             raise
 
 
+SCHOOL = School('11111111-1111-1111-1111-111111111111', 'sgs', 'active', 'rls', {})
+
 SETTINGS = SimpleNamespace(database_url='postgresql://unused/test', db_service_slots=40,
                            db_pool_reserve=0.2, client_name='SGS')
 
 
 class PoolLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        context = school_context(SCHOOL)
+        context.__enter__()
+        self.addCleanup(context.__exit__, None, None, None)
+        role_check = patch('database.verify_rls_role', new_callable=AsyncMock)
+        role_check.start()
+        self.addCleanup(role_check.stop)
+
     async def asyncTearDown(self):
         await database.close_database_pool()
 
@@ -73,7 +84,7 @@ class PoolLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
             async def query():
                 async with database.database_connection() as conn:
-                    self.assertIs(conn, pool.conn)
+                    self.assertIs(conn.raw_connection, pool.conn)
 
             await asyncio.gather(*(query() for _ in range(10)))
             pool.open.assert_awaited_once()
@@ -90,7 +101,7 @@ class PoolLifecycleTests(unittest.IsolatedAsyncioTestCase):
                     raise ValueError('rollback this transaction')
             self.assertEqual(pool.failures, [ValueError])
             async with database.database_connection() as conn:
-                self.assertIs(conn, pool.conn)
+                self.assertIs(conn.raw_connection, pool.conn)
 
     async def test_initial_timeout_can_recover_on_next_request(self):
         failed, healthy = FakePool(), FakePool()
@@ -101,7 +112,7 @@ class PoolLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 await database.get_database_pool()
             failed.close.assert_awaited_once()
             async with database.database_connection() as conn:
-                self.assertIs(conn, healthy.conn)
+                self.assertIs(conn.raw_connection, healthy.conn)
             healthy.open.assert_awaited_once_with(wait=True, timeout=10)
 
     async def test_timeout_maps_to_503(self):
@@ -123,7 +134,7 @@ class PoolLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await ai_tracker.log_ai_usage(module_name='Quiz', feature_used='Generate',
                                                          response={'usageMetadata': {'promptTokenCount': 2, 'candidatesTokenCount': 3}}))
             self.assertEqual(pool.acquisitions, 1)
-            params = pool.conn.execute.call_args.args[1]
+            params = next(call.args[1] for call in pool.conn.execute.call_args_list if 'INSERT INTO' in call.args[0])
             self.assertEqual(params[0], 'SGS')
             self.assertEqual(params[-3:], (2, 3, 5))
 
@@ -188,6 +199,11 @@ class SettingsAndSizingTests(unittest.TestCase):
 
 class ApiRegressionTests(unittest.TestCase):
     def setUp(self):
+        set_school_lookup(lambda host: SCHOOL if host == 'sgs.localhost' else None)
+        self.addCleanup(set_school_lookup, None)
+        role_check = patch('database.verify_rls_role', new_callable=AsyncMock)
+        role_check.start()
+        self.addCleanup(role_check.stop)
         self.pool = FakePool()
         self.settings = patch('database.get_settings', return_value=SETTINGS)
         self.build = patch('database.build_pool', return_value=self.pool)
@@ -197,7 +213,7 @@ class ApiRegressionTests(unittest.TestCase):
         self.addCleanup(self.build.stop)
 
     def test_health_does_not_open_pool_db_health_reuses_it(self):
-        with TestClient(main.app) as client:
+        with TestClient(main.app, base_url='http://sgs.localhost') as client:
             self.assertEqual(client.get('/health').status_code, 200)
             self.pool.open.assert_not_awaited()
             for _ in range(2):
@@ -209,7 +225,7 @@ class ApiRegressionTests(unittest.TestCase):
     def test_current_student_route(self):
         student = {'student_id': 1, 'class_id': 8, 'full_name': 'Demo', 'student_email': 'test@example.com'}
         self.pool.conn.fetchone.return_value = student
-        with TestClient(main.app) as client:
+        with TestClient(main.app, base_url='http://sgs.localhost') as client:
             response = client.get('/students/current', params={'email': 'test@example.com'})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['student'], student)
@@ -217,7 +233,7 @@ class ApiRegressionTests(unittest.TestCase):
     def test_student_analysis_factory_stays_synchronous(self):
         self.pool.conn.fetchone.return_value = {'student_id': 1, 'full_name': 'Demo', 'student_email': 'test@example.com',
                                                'class_id': 8, 'class_name': '8', 'section': 'A', 'roll_no': '1', 'admission_no': 'T1'}
-        with TestClient(main.app) as client:
+        with TestClient(main.app, base_url='http://sgs.localhost') as client:
             response = client.get('/student-analysis', params={'email': 'test@example.com'})
         self.assertEqual(response.status_code, 200)
         self.pool.conn.fetchall.assert_awaited_once()

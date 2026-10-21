@@ -2,6 +2,8 @@
 
 Student dashboard with a FastAPI backend and PostgreSQL content storage.
 
+On branch `saas`, start with [the tenant-kit setup](docs/SAAS_SETUP.md). This branch uses the canonical tenant-kit sample schema and host-based school context.
+
 Database pooling setup, tests and rollout verification: [docs/CONNECTION_POOLING.md](docs/CONNECTION_POOLING.md).
 
 For AWS EC2, Nginx, and RDS deployment, see [docs/EC2_DEPLOYMENT.md](docs/EC2_DEPLOYMENT.md).

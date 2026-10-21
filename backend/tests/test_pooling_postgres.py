@@ -17,6 +17,7 @@ from psycopg.conninfo import conninfo_to_dict
 from psycopg_pool import PoolTimeout
 import database
 import main
+from saraswati_tenant import School, school_context, set_school_lookup
 
 URL = os.getenv('POOL_TEST_DATABASE_URL', '')
 if URL and sys.platform == 'win32':
@@ -34,10 +35,13 @@ class PostgresPoolingTest(unittest.IsolatedAsyncioTestCase):
             with psycopg.connect(URL, autocommit=True) as observer:
                 return observer.execute("SELECT count(*) FROM pg_stat_activity WHERE application_name = 'sgs-student-api'").fetchone()[0]
 
-        with patch('database.get_settings', return_value=settings):
+        school = School('11111111-1111-1111-1111-111111111111', 'sgs', 'active', 'rls', {})
+        set_school_lookup(lambda host: school if host == 'sgs.localhost' else None)
+        self.addCleanup(set_school_lookup, None)
+        with patch('database.get_settings', return_value=settings), school_context(school):
             async with main.lifespan(main.app):
                 self.assertEqual(tagged_count(), 0)
-                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url='http://test') as client:
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url='http://sgs.localhost') as client:
                     self.assertEqual((await client.get('/health')).status_code, 200)
                     self.assertEqual(tagged_count(), 0)
                     self.assertEqual((await client.get('/health/db')).status_code, 200)

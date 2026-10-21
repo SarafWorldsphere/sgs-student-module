@@ -23,6 +23,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import PoolTimeout
 from starlette.concurrency import run_in_threadpool
+from saraswati_tenant import SchoolMiddleware, current_school, s3_path_validator
 
 from database import initialize_database_pool, close_database_pool, database_connection
 
@@ -69,6 +70,9 @@ def get_cors_origins() -> list[str]:
     return local_origins
 
 
+# The last registered middleware is outermost. CORS wraps tenant errors/preflight;
+# only the shared kit resolves the request host for actual API requests.
+app.add_middleware(SchoolMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_cors_origins(),
@@ -76,6 +80,7 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
 
 
 class LearningProfileInput(BaseModel):
@@ -193,7 +198,9 @@ def parse_s3_location(file_url: str) -> tuple[str, str]:
     if parsed.scheme != "s3" or not parsed.netloc or not parsed.path.lstrip("/"):
         raise ValueError("File metadata must contain an s3://bucket/object-key URL.")
 
-    return parsed.netloc, parsed.path.lstrip("/")
+    object_key = parsed.path.lstrip("/")
+    s3_path_validator(object_key, current_school().tenant_id)
+    return parsed.netloc, object_key
 
 
 def sanitize_content_disposition_filename(file_name: str) -> str:
@@ -263,8 +270,8 @@ async def fetch_current_student_record(student_email: str | None = None) -> dict
             student.section,
             student.student_email,
             student.student_phone
-        FROM sgs_student_master student
-        LEFT JOIN sgs_class_master class_master
+        FROM student_master student
+        LEFT JOIN class_master class_master
           ON class_master.class_id = student.class_id
         WHERE COALESCE(student.record_status, 'Active') = 'Active'
           {identity_filter}
@@ -301,7 +308,7 @@ async def fetch_student_email(student_id: int) -> str | None:
                 await cursor.execute(
                     """
                     SELECT NULLIF(BTRIM(student_email), '')
-                    FROM sgs_student_master
+                    FROM student_master
                     WHERE student_id = %s
                       AND COALESCE(record_status, 'Active') = 'Active'
                     LIMIT 1;
@@ -516,6 +523,11 @@ def health_check():
     return {"status": "ok"}
 
 
+@app.get("/public/tenant-config")
+def public_tenant_config():
+    return current_school().public_config()
+
+
 @app.get("/health/db")
 async def database_health_check():
     try:
@@ -538,7 +550,7 @@ async def get_current_student(
     except psycopg.errors.UndefinedTable as error:
         raise HTTPException(
             status_code=500,
-            detail="Student master table is missing. Create sgs_student_master in PostgreSQL.",
+            detail="Student master table is missing. Create student_master in PostgreSQL.",
         ) from error
     except psycopg.Error as error:
         raise HTTPException(
@@ -578,8 +590,8 @@ async def get_current_assignments(
                         r.submitted_at,
                         r.submitted_file_name,
                         r.submitted_file_size
-                    FROM sgs_assignment_master a
-                    LEFT JOIN sgs_assignment_results r
+                    FROM assignment_master a
+                    LEFT JOIN assignment_results r
                       ON r.assignment_id = a.assignment_id
                      AND r.student_id = %s
                      AND COALESCE(r.record_status, 'ACTIVE') = 'ACTIVE'
@@ -602,7 +614,7 @@ async def get_current_assignments(
                             file_name,
                             file_url,
                             created_at
-                        FROM sgs_file_storage_metadata
+                        FROM file_storage_metadata
                         WHERE UPPER(BTRIM(entity_type)) = 'ASSIGNMENT_ATTACHMENT'
                           AND entity_id = ANY(%s)
                           AND LOWER(COALESCE(record_status, 'Active')) = 'active'
@@ -621,7 +633,7 @@ async def get_current_assignments(
         logger.exception("Assignment query references a missing database table.")
         raise HTTPException(
             status_code=500,
-            detail="Assignment tables are missing. Confirm sgs_assignment_master and sgs_assignment_results exist.",
+            detail="Assignment tables are missing. Confirm assignment_master and assignment_results exist.",
         ) from error
     except psycopg.Error as error:
         logger.exception("Unable to fetch assignments from PostgreSQL.")
@@ -692,7 +704,7 @@ async def submit_assignment(payload: AssignmentSubmissionInput):
                 await cursor.execute(
                     """
                     SELECT assignment_id, assignment_title, due_date, subject_id
-                    FROM sgs_assignment_master
+                    FROM assignment_master
                     WHERE assignment_id = %s
                       AND (%s::bigint IS NULL OR class_id = %s)
                       AND COALESCE(record_status, 'Active') = 'Active'
@@ -707,7 +719,7 @@ async def submit_assignment(payload: AssignmentSubmissionInput):
                 await cursor.execute(
                     """
                     SELECT assignment_result_id
-                    FROM sgs_assignment_results
+                    FROM assignment_results
                     WHERE assignment_id = %s
                       AND student_id = %s
                       AND COALESCE(record_status, 'ACTIVE') = 'ACTIVE'
@@ -720,15 +732,13 @@ async def submit_assignment(payload: AssignmentSubmissionInput):
                 if existing_result:
                     await cursor.execute(
                         """
-                        UPDATE sgs_assignment_results
+                        UPDATE assignment_results
                         SET status = 'Submitted',
                             submitted_at = CURRENT_TIMESTAMP,
                             submitted_file_name = %s,
                             submitted_file_type = %s,
                             submitted_file_size = %s,
-                            submitted_file_content = %s,
-                            modified_datetime = CURRENT_TIMESTAMP,
-                            modified_user_id = %s
+                            submitted_file_content = %s
                         WHERE assignment_result_id = %s
                         RETURNING assignment_result_id, submitted_at, submitted_file_name, submitted_file_size;
                         """,
@@ -737,14 +747,13 @@ async def submit_assignment(payload: AssignmentSubmissionInput):
                             payload.file_type or "application/octet-stream",
                             payload.file_size,
                             file_bytes,
-                            str(student["student_id"]),
                             existing_result["assignment_result_id"],
                         ),
                     )
                 else:
                     await cursor.execute(
                         """
-                        INSERT INTO sgs_assignment_results (
+                        INSERT INTO assignment_results (
                             assignment_id,
                             student_id,
                             subject_id,
@@ -784,7 +793,7 @@ async def submit_assignment(payload: AssignmentSubmissionInput):
     except psycopg.errors.UndefinedTable as error:
         raise HTTPException(
             status_code=500,
-            detail="Assignment tables are missing. Confirm sgs_assignment_master and sgs_assignment_results exist.",
+            detail="Assignment tables are missing. Confirm assignment_master and assignment_results exist.",
         ) from error
     except psycopg.Error as error:
         raise HTTPException(status_code=500, detail="Unable to save assignment submission.") from error
@@ -806,7 +815,7 @@ async def get_classes(email: str = Query(..., min_length=3, max_length=150)):
             class_name,
             section_name,
             academic_year
-        FROM sgs_class_master
+        FROM class_master
         WHERE class_id = %s
           AND NULLIF(BTRIM(class_name), '') IS NOT NULL
         ORDER BY class_name, section_name, class_id;
@@ -820,7 +829,7 @@ async def get_classes(email: str = Query(..., min_length=3, max_length=150)):
     except psycopg.errors.UndefinedTable as error:
         raise HTTPException(
             status_code=500,
-            detail="Class master table is missing. Confirm sgs_class_master exists.",
+            detail="Class master table is missing. Confirm class_master exists.",
         ) from error
     except psycopg.Error as error:
         raise HTTPException(status_code=500, detail="Unable to fetch classes.") from error
@@ -841,7 +850,7 @@ async def get_subjects(
             subject_id,
             subject_name,
             subject_code
-        FROM sgs_subject_master
+        FROM subject_master
         WHERE subject_id IS NOT NULL
           AND NULLIF(BTRIM(subject_name), '') IS NOT NULL
           AND class_id = %s
@@ -856,7 +865,7 @@ async def get_subjects(
     except psycopg.errors.UndefinedTable as error:
         raise HTTPException(
             status_code=500,
-            detail="Subject master table is missing. Confirm sgs_subject_master exists.",
+            detail="Subject master table is missing. Confirm subject_master exists.",
         ) from error
     except psycopg.Error as error:
         raise HTTPException(status_code=500, detail="Unable to fetch subjects.") from error
@@ -882,10 +891,11 @@ async def get_chapter_content_list(
                 content.chapter_content_id,
                 content.content_title,
                 chapter.chapter_no
-            FROM sgs_chapter_content content
-            LEFT JOIN sgs_chapter_master chapter
+            FROM chapter_content content
+            LEFT JOIN subject_master subject ON subject.subject_id = content.subject_id
+            LEFT JOIN chapter_master chapter
               ON chapter.chapter_id = content.chapter_id
-            WHERE content.class_id = %s
+            WHERE subject.class_id = %s
               AND content.subject_id = %s
               AND content.chapter_content_id IS NOT NULL
               AND NULLIF(BTRIM(content.content_title), '') IS NOT NULL
@@ -893,7 +903,7 @@ async def get_chapter_content_list(
                   NULLIF(BTRIM(content.full_text_content), '') IS NOT NULL
                   OR EXISTS (
                       SELECT 1
-                      FROM sgs_file_storage_metadata metadata
+                      FROM file_storage_metadata metadata
                       WHERE metadata.entity_id = content.chapter_id
                         AND UPPER(BTRIM(metadata.entity_type)) = %s
                         AND NULLIF(BTRIM(metadata.file_url), '') IS NOT NULL
@@ -915,7 +925,7 @@ async def get_chapter_content_list(
     except psycopg.errors.UndefinedTable as error:
         raise HTTPException(
             status_code=500,
-            detail="Chapter content table is missing. Confirm sgs_chapter_content exists.",
+            detail="Chapter content table is missing. Confirm chapter_content exists.",
         ) from error
     except psycopg.Error as error:
         raise HTTPException(status_code=500, detail="Unable to fetch chapters.") from error
@@ -937,12 +947,13 @@ async def get_study_materials(
             metadata.created_at,
             content.chapter_id,
             content.content_title
-        FROM sgs_chapter_content content
-        INNER JOIN sgs_file_storage_metadata metadata
+        FROM chapter_content content
+            LEFT JOIN subject_master subject ON subject.subject_id = content.subject_id
+        INNER JOIN file_storage_metadata metadata
           ON metadata.entity_id = content.chapter_id
          AND UPPER(BTRIM(metadata.entity_type)) = %s
         WHERE content.chapter_content_id = %s
-          AND content.class_id = %s
+          AND subject.class_id = %s
           AND LOWER(COALESCE(metadata.record_status, 'Active')) = 'active'
         ORDER BY metadata.created_at DESC NULLS LAST, metadata.file_id DESC;
     """
@@ -958,7 +969,7 @@ async def get_study_materials(
     except psycopg.errors.UndefinedTable as error:
         raise HTTPException(
             status_code=500,
-            detail="File metadata table is missing. Confirm sgs_file_storage_metadata exists.",
+            detail="File metadata table is missing. Confirm file_storage_metadata exists.",
         ) from error
     except psycopg.Error as error:
         raise HTTPException(status_code=500, detail="Unable to fetch study materials.") from error
@@ -1007,17 +1018,18 @@ async def get_quiz_chapters(
                 NULLIF(BTRIM(chapter.chapter_name), ''),
                 'Chapter'
             ) AS content_title
-        FROM sgs_chapter_content content
-        LEFT JOIN sgs_chapter_master chapter
+        FROM chapter_content content
+            LEFT JOIN subject_master subject ON subject.subject_id = content.subject_id
+        LEFT JOIN chapter_master chapter
           ON chapter.chapter_id = content.chapter_id
         WHERE content.chapter_id IS NOT NULL
-          AND content.class_id = %s
+          AND subject.class_id = %s
           AND (%s::bigint IS NULL OR content.subject_id = %s)
           AND (
             NULLIF(BTRIM(content.full_text_content), '') IS NOT NULL
             OR EXISTS (
                 SELECT 1
-                FROM sgs_file_storage_metadata metadata
+                FROM file_storage_metadata metadata
                 WHERE metadata.entity_id = content.chapter_id
                   AND UPPER(BTRIM(metadata.entity_type)) = 'CHAPTER_STUDY_MATERIAL'
                   AND LOWER(COALESCE(metadata.record_status, 'Active')) = 'active'
@@ -1067,7 +1079,7 @@ async def get_notices(
             applicable_class,
             posted_by,
             created_datetime
-        FROM sgs_notice_board
+        FROM notice_board
         WHERE {' AND '.join(filters)}
         ORDER BY
             notice_date DESC NULLS LAST,
@@ -1084,7 +1096,7 @@ async def get_notices(
     except psycopg.errors.UndefinedTable as error:
         raise HTTPException(
             status_code=500,
-            detail="Notice board table is missing. Confirm sgs_notice_board exists.",
+            detail="Notice board table is missing. Confirm notice_board exists.",
         ) from error
     except psycopg.Error as error:
         raise HTTPException(status_code=500, detail="Unable to fetch notices.") from error
@@ -1100,8 +1112,8 @@ async def get_notifications(email: str = Query(..., min_length=3, max_length=150
             student.class_id,
             student.student_email,
             COALESCE(NULLIF(BTRIM(class_master.class_name), ''), NULLIF(BTRIM(student.class_name), ''), student.class_id::text) AS class_name
-        FROM sgs_student_master student
-        LEFT JOIN sgs_class_master class_master
+        FROM student_master student
+        LEFT JOIN class_master class_master
           ON class_master.class_id = student.class_id
         WHERE COALESCE(student.record_status, 'Active') = 'Active'
           AND LOWER(BTRIM(student.student_email)) = LOWER(BTRIM(%s))
@@ -1121,9 +1133,9 @@ async def get_notifications(email: str = Query(..., min_length=3, max_length=150
             a.chapter_id,
             s.subject_name,
             c.chapter_name
-        FROM sgs_assignment_master a
-        LEFT JOIN sgs_subject_master s ON s.subject_id = a.subject_id
-        LEFT JOIN sgs_chapter_master c ON c.chapter_id = a.chapter_id
+        FROM assignment_master a
+        LEFT JOIN subject_master s ON s.subject_id = a.subject_id
+        LEFT JOIN chapter_master c ON c.chapter_id = a.chapter_id
         WHERE a.class_id = %s
           AND COALESCE(a.record_status, 'Active') = 'Active'
           AND a.due_date IS NOT NULL
@@ -1141,7 +1153,7 @@ async def get_notifications(email: str = Query(..., min_length=3, max_length=150
             posted_by,
             created_datetime,
             COALESCE(is_read, false) AS is_read
-        FROM sgs_notice_board
+        FROM notice_board
         WHERE COALESCE(record_status, 'Active') = 'Active'
           AND (
             applicable_class IS NULL
@@ -1166,8 +1178,8 @@ async def get_notifications(email: str = Query(..., min_length=3, max_length=150
             result.marks_obtained,
             result.percentage,
             COALESCE(result.is_absent, false) AS is_absent
-        FROM sgs_assessment_results result
-        INNER JOIN sgs_assessments assessment
+        FROM assessment_results result
+        INNER JOIN assessments assessment
           ON assessment.assessment_id = result.assessment_id
         WHERE result.student_id = %s
           AND COALESCE(result.record_status, 'Active') = 'Active'
@@ -1177,7 +1189,7 @@ async def get_notifications(email: str = Query(..., min_length=3, max_length=150
     """
     read_status_query = """
         SELECT notification_type, source_id
-        FROM sgs_student_notification_status
+        FROM student_notification_status
         WHERE student_id = %s
           AND read_at IS NOT NULL;
     """
@@ -1313,7 +1325,7 @@ async def mark_notifications_read(payload: NotificationReadInput):
         return {"marked_read": 0}
 
     query = """
-        INSERT INTO sgs_student_notification_status (
+        INSERT INTO student_notification_status (
             student_id,
             notification_type,
             source_id,
@@ -1321,7 +1333,7 @@ async def mark_notifications_read(payload: NotificationReadInput):
             read_at
         )
         VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        ON CONFLICT (student_id, notification_type, source_id)
+        ON CONFLICT (tenant_id, student_id, notification_type, source_id)
         DO UPDATE SET read_at = CURRENT_TIMESTAMP;
     """
     try:
@@ -1350,7 +1362,7 @@ async def get_help_support():
             support_email,
             support_phone,
             display_order
-        FROM sgs_help_support
+        FROM help_support
         WHERE COALESCE(record_status, 'Active') = 'Active'
           AND COALESCE(is_active, true) = true
         ORDER BY display_order ASC, help_id ASC;
@@ -1364,7 +1376,7 @@ async def get_help_support():
     except psycopg.errors.UndefinedTable as error:
         raise HTTPException(
             status_code=500,
-            detail="Help and support table is missing. Confirm sgs_help_support exists.",
+            detail="Help and support table is missing. Confirm help_support exists.",
         ) from error
     except psycopg.Error as error:
         raise HTTPException(status_code=500, detail="Unable to fetch help and support information.") from error
@@ -1441,11 +1453,12 @@ async def fetch_chapter_for_quiz(chapter_id: int, class_id: int) -> dict:
             content.chapter_id,
             COALESCE(NULLIF(BTRIM(content.content_title), ''), chapter.chapter_name, 'Chapter') AS chapter_title,
             COALESCE(content.full_text_content, '') AS full_text_content
-        FROM sgs_chapter_content content
-        LEFT JOIN sgs_chapter_master chapter
+        FROM chapter_content content
+            LEFT JOIN subject_master subject ON subject.subject_id = content.subject_id
+        LEFT JOIN chapter_master chapter
           ON chapter.chapter_id = content.chapter_id
         WHERE content.chapter_id = %s
-          AND content.class_id = %s
+          AND subject.class_id = %s
           AND COALESCE(content.is_active, true) = true
           AND COALESCE(content.record_status, 'Active') = 'Active'
         ORDER BY content.chapter_content_id
@@ -1460,7 +1473,7 @@ async def fetch_chapter_for_quiz(chapter_id: int, class_id: int) -> dict:
     except psycopg.errors.UndefinedTable as error:
         raise HTTPException(
             status_code=500,
-            detail="Chapter content table is missing. Create sgs_chapter_content in PostgreSQL.",
+            detail="Chapter content table is missing. Create chapter_content in PostgreSQL.",
         ) from error
     except psycopg.Error as error:
         raise HTTPException(status_code=500, detail="Unable to fetch chapter content.") from error
@@ -1475,7 +1488,7 @@ async def fetch_quiz_study_material_parts(chapter_id: int) -> tuple[list[dict], 
     """Load a bounded set of chapter PDFs for Gemini's native document input."""
     query = """
         SELECT file_name, file_url
-        FROM sgs_file_storage_metadata
+        FROM file_storage_metadata
         WHERE entity_id = %s
           AND UPPER(BTRIM(entity_type)) = %s
           AND LOWER(COALESCE(record_status, 'Active')) = 'active'
@@ -1492,7 +1505,7 @@ async def fetch_quiz_study_material_parts(chapter_id: int) -> tuple[list[dict], 
     except psycopg.errors.UndefinedTable as error:
         raise HTTPException(
             status_code=500,
-            detail="File metadata table is missing. Confirm sgs_file_storage_metadata exists.",
+            detail="File metadata table is missing. Confirm file_storage_metadata exists.",
         ) from error
     except psycopg.Error as error:
         raise HTTPException(status_code=500, detail="Unable to fetch quiz study materials.") from error
@@ -1610,7 +1623,7 @@ async def save_quiz_result(payload: QuizResultInput):
                 await cursor.execute(
                     """
                     SELECT subject_id
-                    FROM sgs_chapter_content
+                    FROM chapter_content
                     WHERE chapter_id = %s
                     ORDER BY chapter_content_id DESC
                     LIMIT 1;
@@ -1624,7 +1637,7 @@ async def save_quiz_result(payload: QuizResultInput):
                 await cursor.execute(
                     """
                     SELECT COALESCE(MAX(attempt_count), 0) + 1 AS next_attempt
-                    FROM sgs_quiz_response
+                    FROM quiz_response
                     WHERE student_id = %s
                       AND chapter_id = %s
                       AND COALESCE(record_status, 'Active') = 'Active';
@@ -1636,7 +1649,7 @@ async def save_quiz_result(payload: QuizResultInput):
 
                 await cursor.execute(
                     """
-                    INSERT INTO sgs_quiz_response (
+                    INSERT INTO quiz_response (
                         student_id,
                         score,
                         completed_flag,
@@ -1700,16 +1713,16 @@ async def get_quiz_results(
                 'Chapter'
             ) AS chapter_title,
             subject.subject_name
-        FROM sgs_quiz_response response
+        FROM quiz_response response
         LEFT JOIN LATERAL (
             SELECT chapter_content.content_title
-            FROM sgs_chapter_content chapter_content
+            FROM chapter_content chapter_content
             WHERE chapter_content.chapter_id = response.chapter_id
             ORDER BY chapter_content.chapter_content_id DESC
             LIMIT 1
         ) content ON true
-        LEFT JOIN sgs_chapter_master chapter ON chapter.chapter_id = response.chapter_id
-        LEFT JOIN sgs_subject_master subject ON subject.subject_id = response.subject_id
+        LEFT JOIN chapter_master chapter ON chapter.chapter_id = response.chapter_id
+        LEFT JOIN subject_master subject ON subject.subject_id = response.subject_id
         WHERE response.student_id = %s
           AND COALESCE(response.completed_flag, true) = true
           AND COALESCE(response.record_status, 'Active') = 'Active'
@@ -1944,29 +1957,33 @@ def normalize_percent(value) -> float:
         return 0.0
 
     numeric_value = float(value)
-    if numeric_value <= 20:
-        return round(numeric_value * 5, 2)
-
-    return round(min(numeric_value, 100), 2)
+    # Canonical kit assessment/quiz values are percentages, including 0-20.
+    return round(max(0, min(numeric_value, 100)), 2)
 
 
 async def calculate_performance_summary(student_id: int) -> dict:
     query = """
         SELECT
             (
-                SELECT AVG(percentage)
-                FROM sgs_assignment_results
-                WHERE student_id = %(student_id)s
+                SELECT AVG(COALESCE(result.percentage,
+                    result.marks_obtained / NULLIF(assessment.max_marks, 0) * 100))
+                FROM assessment_results result
+                JOIN assessments assessment ON assessment.assessment_id = result.assessment_id
+                WHERE result.student_id = %(student_id)s
+                  AND assessment.assessment_type = 'assignment'
+                  AND COALESCE(result.record_status, 'Active') = 'Active'
+                  AND COALESCE(assessment.record_status, 'Active') = 'Active'
+                  AND COALESCE(result.is_absent, false) = false
             ) AS assignment_marks,
             (
                 SELECT AVG(COALESCE(percentage, score))
-                FROM sgs_quiz_response
+                FROM quiz_response
                 WHERE student_id = %(student_id)s
                   AND COALESCE(completed_flag, true) = true
             ) AS quiz_score,
             (
                 SELECT GREATEST(COUNT(*) - 1, 0)
-                FROM sgs_quiz_response
+                FROM quiz_response
                 WHERE student_id = %(student_id)s
                   AND COALESCE(completed_flag, true) = true
             ) AS retry_count,
@@ -1975,13 +1992,14 @@ async def calculate_performance_summary(student_id: int) -> dict:
                     result.percentage,
                     (result.marks_obtained / NULLIF(assessment.max_marks, 0)) * 100
                 ))
-                FROM sgs_assessment_results result
-                INNER JOIN sgs_assessments assessment
+                FROM assessment_results result
+                INNER JOIN assessments assessment
                   ON assessment.assessment_id = result.assessment_id
                 WHERE result.student_id = %(student_id)s
                   AND COALESCE(result.record_status, 'Active') = 'Active'
                   AND COALESCE(assessment.record_status, 'Active') = 'Active'
                   AND COALESCE(result.is_absent, false) = false
+                  AND assessment.assessment_type IN ('test', 'exam')
             ) AS unit_test_marks;
     """
 
@@ -2060,10 +2078,10 @@ async def get_student_progress(
             result.marks_obtained,
             result.percentage,
             COALESCE(result.is_absent, false) AS is_absent
-        FROM sgs_assessment_results result
-        INNER JOIN sgs_assessments assessment
+        FROM assessment_results result
+        INNER JOIN assessments assessment
           ON assessment.assessment_id = result.assessment_id
-        LEFT JOIN sgs_exam_master exam
+        LEFT JOIN exam_master exam
           ON exam.exam_id = assessment.exam_id
         WHERE result.student_id = %s
           AND (assessment.class_id = %s OR assessment.class_id IS NULL)
@@ -2248,7 +2266,7 @@ async def generate_study_content(payload: StudyContentGenerationInput):
             chapter_content_id,
             content_title,
             full_text_content
-        FROM sgs_chapter_content
+        FROM chapter_content
         WHERE chapter_content_id = %s
           AND full_text_content IS NOT NULL
           AND BTRIM(full_text_content) <> ''
@@ -2263,7 +2281,7 @@ async def generate_study_content(payload: StudyContentGenerationInput):
     except psycopg.errors.UndefinedTable as error:
         raise HTTPException(
             status_code=500,
-            detail="Chapter content table is missing. Confirm sgs_chapter_content exists.",
+            detail="Chapter content table is missing. Confirm chapter_content exists.",
         ) from error
     except psycopg.Error as error:
         raise HTTPException(status_code=500, detail="Unable to fetch chapter content.") from error
@@ -2331,17 +2349,18 @@ async def get_chapter_content(
             SELECT
                 content.chapter_content_id,
                 content.chapter_id,
-                content.class_id,
+                subject.class_id,
                 content.subject_id,
                 content.content_title,
                 content.full_text_content,
-                content.content_format,
-                material.file_url AS pdf_url,
+                CASE WHEN COALESCE(material.file_url, content.pdf_url) IS NOT NULL THEN 'pdf' ELSE 'text' END AS content_format,
+                COALESCE(material.file_url, content.pdf_url) AS pdf_url,
                 material.file_name
-            FROM sgs_chapter_content content
+            FROM chapter_content content
+            LEFT JOIN subject_master subject ON subject.subject_id = content.subject_id
             LEFT JOIN LATERAL (
                 SELECT metadata.file_url, metadata.file_name
-                FROM sgs_file_storage_metadata metadata
+                FROM file_storage_metadata metadata
                 WHERE metadata.entity_id = content.chapter_id
                   AND UPPER(BTRIM(metadata.entity_type)) = %s
                   AND NULLIF(BTRIM(metadata.file_url), '') IS NOT NULL
@@ -2350,7 +2369,7 @@ async def get_chapter_content(
                 LIMIT 1
             ) material ON true
             WHERE content.chapter_content_id = %s
-              AND content.class_id = %s
+              AND subject.class_id = %s
               AND (
                   NULLIF(BTRIM(content.full_text_content), '') IS NOT NULL
                   OR material.file_url IS NOT NULL
@@ -2371,7 +2390,7 @@ async def get_chapter_content(
         except psycopg.errors.UndefinedTable as error:
             raise HTTPException(
                 status_code=500,
-                detail="Chapter content table is missing. Create sgs_chapter_content in PostgreSQL.",
+                detail="Chapter content table is missing. Create chapter_content in PostgreSQL.",
             ) from error
         except psycopg.Error as error:
             raise HTTPException(
@@ -2423,7 +2442,7 @@ async def get_chapter_content(
 
     query = """
         SELECT full_text_content
-        FROM sgs_chapter_content
+        FROM chapter_content
         WHERE full_text_content IS NOT NULL
           AND BTRIM(full_text_content) <> ''
         LIMIT 1;
@@ -2437,7 +2456,7 @@ async def get_chapter_content(
     except psycopg.errors.UndefinedTable as error:
         raise HTTPException(
             status_code=500,
-            detail="Chapter content table is missing. Create sgs_chapter_content in PostgreSQL.",
+            detail="Chapter content table is missing. Create chapter_content in PostgreSQL.",
         ) from error
     except psycopg.Error as error:
         raise HTTPException(
@@ -2477,7 +2496,7 @@ async def save_student_learning_profile(profile: LearningProfileInput):
     classification, path = await build_learning_profile_payload(profile)
 
     query = """
-        INSERT INTO sgs_student_learning_profiles (
+        INSERT INTO student_learning_profiles (
             student_id,
             chapter_id,
             chapter_title,
@@ -2489,7 +2508,7 @@ async def save_student_learning_profile(profile: LearningProfileInput):
             generated_path
         )
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (student_id, chapter_id)
+        ON CONFLICT (tenant_id, student_id, chapter_id)
         DO UPDATE SET
             chapter_title = EXCLUDED.chapter_title,
             reading_time_minutes = EXCLUDED.reading_time_minutes,
@@ -2545,7 +2564,7 @@ async def get_student_learning_profile(
 ):
     query = """
         SELECT *
-        FROM sgs_student_learning_profiles
+        FROM student_learning_profiles
         WHERE student_id = %s AND chapter_id = %s
         LIMIT 1;
     """

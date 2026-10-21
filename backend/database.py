@@ -7,9 +7,11 @@ from contextlib import asynccontextmanager
 
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 from starlette.concurrency import run_in_threadpool
+from saraswati_tenant import current_school
 
 from pool_psycopg import build_pool
 from settings import get_settings
+from tenant_session import SchoolConnection, apply_connection_rls
 
 SERVICE_NAME = "sgs-student-api"
 _pool: AsyncConnectionPool | None = None
@@ -61,9 +63,23 @@ async def get_database_pool() -> AsyncConnectionPool:
 
 @asynccontextmanager
 async def database_connection():
+    school = current_school()  # No school context must fail before pool checkout.
+    if school.isolation != "rls":
+        raise RuntimeError("Student SaaS backend currently requires shared RLS isolation.")
     pool = await get_database_pool()
     async with pool.connection() as connection:
-        yield connection
+        await verify_rls_role(connection)
+        await apply_connection_rls(connection)
+        yield SchoolConnection(connection)
+
+
+async def verify_rls_role(connection) -> None:
+    cursor = await connection.execute(
+        "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user"
+    )
+    role = await cursor.fetchone()
+    if role is None or role[0] or role[1]:
+        raise RuntimeError("The SaaS application role must be NOSUPERUSER NOBYPASSRLS.")
 
 
 async def close_database_pool() -> None:
