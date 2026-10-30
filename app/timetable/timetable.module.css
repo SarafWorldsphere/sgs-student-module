@@ -1,0 +1,57 @@
+.page { padding: 30px; color: #14263b; }
+.heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 26px; }
+.eyebrow { margin: 0 0 8px; color: #9ed9ee; font-size: 11px; font-weight: 700; letter-spacing: 2px; }
+.heading h2 { margin: 0; color: white; font-size: 30px; letter-spacing: -.6px; }
+.description { margin: 10px 0 0; color: #ccd3e6; font-size: 14px; line-height: 1.6; }
+.classBadge { padding: 11px 16px; border: 1px solid #56708b; border-radius: 24px; background: #182c47; color: #ecf7ff; font-size: 13px; white-space: nowrap; }
+.card { overflow: hidden; border: 1px solid #dfe6ee; border-radius: 16px; background: #fff; box-shadow: 0 14px 40px #02091733; }
+.toolbar { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 16px; padding: 22px; border-bottom: 1px solid #e7edf3; }
+.filters { display: flex; flex-wrap: wrap; gap: 16px; }
+.filters label { display: grid; gap: 7px; color: #4d5e71; font-size: 12px; font-weight: 600; }
+.filters select { min-width: 155px; padding: 10px 32px 10px 12px; border: 1px solid #cbd6e2; border-radius: 8px; color: #152d48; background: #fff; font: inherit; font-size: 14px; }
+.refresh { display: inline-flex; align-items: center; gap: 7px; padding: 10px 15px; border: 1px solid #cbd8e6; border-radius: 8px; background: #f6f9fd; color: #164873; font-size: 13px; font-weight: 600; cursor: pointer; }
+.refresh span { font-size: 18px; line-height: 1; }
+.refresh:disabled, .filters select:disabled { cursor: default; opacity: .6; }
+.refresh:hover:not(:disabled) { background: #eaf2fb; }
+.refresh:focus-visible, .filters select:focus-visible, .dayTabs button:focus-visible, .weekView:focus-visible { outline: 3px solid #4a9de3; outline-offset: 3px; }
+.legend { display: flex; flex-wrap: wrap; gap: 18px; padding: 18px 22px 8px; font-size: 12px; color: #5c6c7d; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.legend i { width: 9px; height: 9px; border-radius: 3px; }
+.lessonDot { background: #47a899; }.breakDot { background: #e7c37b; }.freeDot { background: #c9d2dd; }
+.scrollHint { margin: 0; padding: 6px 22px 16px; font-size: 12px; color: #6c7f91; }
+.weekView { width: 100%; overflow-x: auto; }
+.grid { width: 100%; min-width: 1200px; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+.grid th, .grid td { padding: 15px 11px; border-top: 1px solid #e4eaf0; border-right: 1px solid #e4eaf0; text-align: left; overflow-wrap: anywhere; }
+.grid thead th { background: #edf3f9; color: #304d68; font-size: 12px; font-weight: 600; width: 132px; }
+.grid thead small { display: block; margin-top: 7px; color: #637789; font-weight: 400; font-size: 11px; line-height: 1.65; }
+.grid .dayHeader { width: 110px; position: sticky; left: 0; z-index: 1; background: #f5f8fc; color: #254464; font-size: 12px; font-weight: 600; box-shadow: 2px 0 4px #14263b05; }
+.grid thead .dayHeader { background: #edf3f9; }
+.grid tbody td { height: 104px; vertical-align: middle; }
+.grid .breakHeader { width: 105px; background: #fff6e4; color: #785927; }
+.breakCell { background: #fffaf0; }.lessonCell { background: #f0faf7; }.freeCell { background: #fff; }
+.subject { display: block; color: #176052; font-size: 13px; line-height: 1.5; }
+.teacher { display: block; margin-top: 6px; color: #5a6d7b; font-size: 11px; line-height: 1.5; }
+.breakLabel { color: #92703a; font-size: 12px; line-height: 1.5; }
+.freeLabel { color: #82909f; font-size: 12px; }
+.state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; min-height: 270px; padding: 36px 24px; color: #65778a; text-align: center; }
+.state h3 { margin: 0; color: #254464; font-size: 19px; }.state p { margin: 0; max-width: 480px; line-height: 1.65; font-size: 14px; }
+.error { background: #fff9f9; }.error h3 { color: #9c3545; }
+.notice { margin: 18px 22px 0; padding: 12px 16px; border: 1px solid #d5e8f5; border-radius: 8px; background: #f0f7fc; color: #315777; font-size: 13px; line-height: 1.6; }
+.spinner { width: 24px; height: 24px; border: 3px solid #dae6ef; border-top-color: #2679b7; border-radius: 50%; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+.footer { margin: 18px 0 0; color: #bec9db; font-size: 12px; line-height: 1.6; }
+.mobileView { display: none; }.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@media (max-width: 760px) {
+  .page { padding: 22px 16px; }.heading { align-items: flex-start; flex-direction: column; gap: 14px; margin-bottom: 20px; }.heading h2 { font-size: 26px; }
+  .toolbar { padding: 16px; }.filters { gap: 10px; flex: 1; }.filters label { flex: 1; }.filters select { min-width: 120px; width: 100%; }
+  .legend { padding: 16px; gap: 12px; font-size: 11px; }.weekView, .scrollHint { display: none; }.mobileView { display: block; padding: 0 16px 16px; }
+  .dayTabs { display: flex; gap: 5px; padding: 3px; border: 1px solid #e0e7ef; border-radius: 9px; background: #f4f7fa; }
+  .dayTabs button { flex: 1; padding: 10px 0; border: 0; border-radius: 6px; background: transparent; color: #62778a; font-size: 12px; cursor: pointer; }
+  .dayTabs button[aria-pressed="true"] { background: #164d7d; color: #fff; box-shadow: 0 2px 4px #164d7d20; }
+  .mobileDay { margin: 22px 0 14px; color: #264563; font-size: 17px; }.dayList { list-style: none; padding: 0; margin: 0; }
+  .dayList li { display: grid; grid-template-columns: 82px 1fr; gap: 13px; padding: 15px 0; border-top: 1px solid #e7edf3; }
+  .time { display: flex; flex-direction: column; gap: 6px; padding-top: 2px; font-size: 11px; color: #7c8999; }.time strong { font-weight: 600; color: #456079; }
+  .mobileSlot { padding: 11px 13px; border-left: 3px solid #50a58e; border-radius: 5px; background: #eff8f5; }.mobileBreak .mobileSlot { border-left-color: #dfbd7c; background: #fff7e8; }
+  .periodLabel { display: block; margin-bottom: 5px; color: #6d837c; font-size: 10px; text-transform: uppercase; letter-spacing: .6px; }.notice { margin: 16px; }
+}

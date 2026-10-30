@@ -15,6 +15,7 @@ import LoginUpdatePopup from "./login-update-popup";
 
 const navItems = [
   ["home", "Dashboard", "/"],
+  ["calendar", "Timetable", "/timetable"],
   ["book-open", "Core Study", "/chapters"],
   ["clipboard", "Assignments", "/assignments"],
   ["target", "Assessments", "/assessments"],
@@ -77,6 +78,11 @@ async function handleLogout() {
 }
 
 function Icon({ name, className = "" }) {
+  if (name === "calendar") {
+    return <svg className={`icon ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+      <rect x="3" y="5" width="18" height="16" rx="2" /><path d="M7 3v4M17 3v4M3 11h18M7 15h2M12 15h2M7 18h2" />
+    </svg>;
+  }
   return <span className={`icon ${name} ${className}`} aria-hidden="true" />;
 }
 

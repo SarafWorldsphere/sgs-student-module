@@ -1,0 +1,6 @@
+{
+  "classes": "sgs_class_master",
+  "periods": "sgs_period_master",
+  "timetable": "sgs_timetable",
+  "teachers": "sgs_teacher_master"
+}
