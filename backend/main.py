@@ -26,9 +26,10 @@ from starlette.concurrency import run_in_threadpool
 
 from database import initialize_database_pool, close_database_pool, database_connection
 
-from ai_learning_path_service import classify_performance, classify_reader, get_learning_path_generator
+from ai_learning_path_service import classify_reader, get_learning_path_generator
 from student_analysis import create_student_analysis_router
 from student_timetable import create_student_timetable_router
+from performance_summary import CATEGORIES, calculate_marks_summary
 from utils.ai_tracker import log_ai_usage
 
 
@@ -91,10 +92,7 @@ class LearningProfileInput(BaseModel):
 
 class PerformanceLearningPathInput(BaseModel):
     student_id: int = Field(..., ge=1)
-    assignment_marks: float = Field(..., ge=0, le=100)
-    quiz_score: float = Field(..., ge=0, le=100)
-    unit_test_marks: float = Field(..., ge=0, le=100)
-    retry_count: int = Field(..., ge=0, le=500)
+
 
 
 class StudyContentGenerationInput(BaseModel):
@@ -1945,78 +1943,8 @@ async def build_learning_profile_payload(profile: LearningProfileInput):
     return classification, path
 
 
-def normalize_percent(value) -> float:
-    if value is None:
-        return 0.0
-
-    numeric_value = float(value)
-    if numeric_value <= 20:
-        return round(numeric_value * 5, 2)
-
-    return round(min(numeric_value, 100), 2)
-
-
 async def calculate_performance_summary(student_id: int) -> dict:
-    query = """
-        SELECT
-            (
-                SELECT AVG(percentage)
-                FROM sgs_assignment_results
-                WHERE student_id = %(student_id)s
-            ) AS assignment_marks,
-            (
-                SELECT AVG(COALESCE(percentage, score))
-                FROM sgs_quiz_response
-                WHERE student_id = %(student_id)s
-                  AND COALESCE(completed_flag, true) = true
-            ) AS quiz_score,
-            (
-                SELECT GREATEST(COUNT(*) - 1, 0)
-                FROM sgs_quiz_response
-                WHERE student_id = %(student_id)s
-                  AND COALESCE(completed_flag, true) = true
-            ) AS retry_count,
-            (
-                SELECT AVG(COALESCE(
-                    result.percentage,
-                    (result.marks_obtained / NULLIF(assessment.max_marks, 0)) * 100
-                ))
-                FROM sgs_assessment_results result
-                INNER JOIN sgs_assessments assessment
-                  ON assessment.assessment_id = result.assessment_id
-                WHERE result.student_id = %(student_id)s
-                  AND COALESCE(result.record_status, 'Active') = 'Active'
-                  AND COALESCE(assessment.record_status, 'Active') = 'Active'
-                  AND COALESCE(result.is_absent, false) = false
-            ) AS unit_test_marks;
-    """
-
-    try:
-        async with get_connection() as connection:
-            async with connection.cursor(row_factory=dict_row) as cursor:
-                await cursor.execute(query, {"student_id": student_id})
-                row = await cursor.fetchone() or {}
-    except psycopg.errors.UndefinedTable as error:
-        raise HTTPException(
-            status_code=500,
-            detail="Performance tables are missing. Confirm assignment, quiz, assessment, and assessment result tables exist.",
-        ) from error
-    except psycopg.Error as error:
-        raise HTTPException(status_code=500, detail="Unable to fetch performance summary.") from error
-
-    metrics = {
-        "assignment_marks": normalize_percent(row.get("assignment_marks")),
-        "quiz_score": normalize_percent(row.get("quiz_score")),
-        "unit_test_marks": normalize_percent(row.get("unit_test_marks")),
-        "retry_count": int(row.get("retry_count") or 0),
-    }
-    classification = classify_performance(**metrics)
-
-    return {
-        "student_id": student_id,
-        **metrics,
-        "classification": classification,
-    }
+    return await calculate_marks_summary(student_id, get_connection)
 
 
 def _progress_percentage(value, maximum):
@@ -2218,13 +2146,12 @@ async def get_student_performance_summary(
 
 @app.post("/learning-path/generate-overall")
 async def generate_overall_learning_path(payload: PerformanceLearningPathInput):
-    metrics = {
-        "assignment_marks": round(payload.assignment_marks, 2),
-        "quiz_score": round(payload.quiz_score, 2),
-        "unit_test_marks": round(payload.unit_test_marks, 2),
-        "retry_count": payload.retry_count,
-    }
-    classification = classify_performance(**metrics)
+    performance = await calculate_performance_summary(payload.student_id)
+    classification = performance["classification"]
+    if classification is None:
+        raise HTTPException(409, detail="No graded marks are available yet. Please try again after marks are recorded.")
+    metrics = {key: performance[key] for key in CATEGORIES}
+    metrics["overall_score"] = performance["overall_score"]
 
     try:
         path = await get_learning_path_generator().generate_path(
@@ -2241,13 +2168,16 @@ async def generate_overall_learning_path(payload: PerformanceLearningPathInput):
         "classification": classification,
         "metrics": metrics,
         "learning_path": path,
+        "performance": performance,
     }
 
 
 @app.post("/ai/generate-study-content")
 async def generate_study_content(payload: StudyContentGenerationInput):
     performance = await calculate_performance_summary(payload.student_id)
-    classification = payload.classification or performance["classification"]
+    classification = performance["classification"]
+    if classification is None:
+        raise HTTPException(409, detail="No graded marks are available yet. Please try again after marks are recorded.")
 
     query = """
         SELECT
@@ -2284,7 +2214,7 @@ async def generate_study_content(payload: StudyContentGenerationInput):
         Learner type: {classification}
         Chapter title: {chapter["content_title"]}
         Overall performance metrics:
-        {json.dumps({key: performance[key] for key in ["assignment_marks", "quiz_score", "unit_test_marks", "retry_count"]})}
+        {json.dumps({key: performance[key] for key in [*CATEGORIES, "overall_score"]})}
 
         Return only valid JSON in this exact shape:
         {{
@@ -2320,6 +2250,7 @@ async def generate_study_content(payload: StudyContentGenerationInput):
         "chapter_content_id": payload.chapter_content_id,
         "chapter_title": chapter["content_title"],
         "classification": classification,
+        "performance": performance,
         "generated_content": generated_content,
     }
 

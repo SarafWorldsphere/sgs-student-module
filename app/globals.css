@@ -3742,7 +3742,7 @@ button {
 .learning-form-grid label {
   display: grid;
   gap: 8px;
-  color: #263469;
+  color: #e2e8f0;
   font-size: 14px;
   font-weight: 800;
 }
@@ -3817,7 +3817,7 @@ button {
   gap: 12px;
   margin: 0;
   padding-left: 22px;
-  color: #07133c;
+  color: #e2e8f0;
   font-size: 18px;
   line-height: 1.5;
 }
@@ -5383,4 +5383,26 @@ button {
   .progress-history-table-wrap { overflow-x: auto; }
   .progress-filter-bar { align-items: stretch; flex-direction: column; }
   .progress-filter-bar label { width: 100%; }
+}
+
+/* Learning path: readable labels and generated lists on dark cards. */
+.learning-path-page .learning-form-grid label > span,
+.learning-path-page .learning-step-list,
+.learning-path-page .learning-step-list li,
+.learning-path-page .generated-path-card .learning-focus-box strong {
+  color: #e2e8f0;
+}
+.learning-path-page .learning-form-grid label > span { font-weight: 700; }
+.learning-path-page .learning-track.selected { background: #eafaf0; border-color: #35bb7b; }
+.learning-path-page .learning-track.selected h3,
+.learning-path-page .learning-track.selected p { color: #102a21; }
+.learning-path-page .learning-marks-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 22px; }
+.learning-path-page .learning-marks-grid > div { padding: 14px 16px; border: 1px solid #40516d; border-radius: 8px; background: #111d35; }
+.learning-path-page .learning-marks-grid span { color: #cbd5e1; }
+.learning-path-page .learning-marks-grid strong { display: block; margin-top: 8px; color: #f8fafc; }
+.learning-path-page .learning-scoring-note { max-width: none; margin: 14px 0 0; color: #cbd5e1; font-size: 13px; line-height: 1.7; }
+.learning-path-page .primary-button:disabled { opacity: .55; cursor: not-allowed; }
+@media (max-width: 680px) {
+  .learning-path-page .learning-marks-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .learning-path-page .learning-form-grid { grid-template-columns: minmax(0, 1fr); }
 }

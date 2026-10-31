@@ -3,6 +3,7 @@
 Student dashboard with a FastAPI backend and PostgreSQL content storage.
 
 Student timetable setup and API contract: [docs/STUDENT_TIMETABLE.md](docs/STUDENT_TIMETABLE.md).
+Marks-based learning paths and grading configuration: [docs/LEARNING_PATH_MARKS.md](docs/LEARNING_PATH_MARKS.md).
 
 Database pooling setup, tests and rollout verification: [docs/CONNECTION_POOLING.md](docs/CONNECTION_POOLING.md).
 
