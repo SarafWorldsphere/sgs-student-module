@@ -5,6 +5,8 @@ import { getApiBaseUrl } from "../api-base-url";
 import DashboardShell from "../dashboard-shell";
 import { getLoggedInUserEmail } from "../login-session";
 import StudyTabs from "../study-tabs";
+import { filterAssignments, isCompleted, sortAssignments } from "./assignment-list.mjs";
+import styles from "./assignment-list.module.css";
 
 const API_BASE_URL = getApiBaseUrl();
 const maxFileSize = 10 * 1024 * 1024;
@@ -77,6 +79,7 @@ export default function AssignmentsPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [activeView, setActiveView] = useState("materials");
+  const [category, setCategory] = useState("pending");
 
   async function loadAssignments() {
     setLoading(true);
@@ -87,20 +90,21 @@ export default function AssignmentsPage() {
       const params = new URLSearchParams();
       if (studentEmail) params.set("email", studentEmail);
       const query = params.toString();
-      const response = await fetch(`${API_BASE_URL}/assignments/current${query ? `?${query}` : ""}`);
+      const response = await fetch(`${API_BASE_URL}/assignments/current${query ? `?${query}` : ""}`, { credentials: "include", cache: "no-store" });
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
         throw new Error(typeof data.detail === "string" ? data.detail : "Unable to load assignments.");
       }
 
-      const nextAssignments = Array.isArray(data.assignments) ? data.assignments : [];
+      const nextAssignments = sortAssignments(Array.isArray(data.assignments) ? data.assignments : []);
+      const visible = filterAssignments(nextAssignments, category);
       setAssignments(nextAssignments);
       setSelectedAssignment((current) => {
         if (current) {
-          return nextAssignments.find((assignment) => assignment.assignment_id === current.assignment_id) || nextAssignments[0] || null;
+          return visible.find((assignment) => assignment.assignment_id === current.assignment_id) || visible[0] || null;
         }
-        return nextAssignments[0] || null;
+        return visible[0] || null;
       });
     } catch (loadError) {
       setError(loadError.message || "Unable to load assignments.");
@@ -190,6 +194,7 @@ export default function AssignmentsPage() {
       const fileContentBase64 = await fileToBase64(selectedFile);
       const response = await fetch(`${API_BASE_URL}/assignments/submit`, {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json"
         },
@@ -221,8 +226,18 @@ export default function AssignmentsPage() {
     }
   }
 
-  const assignmentsWithMaterials = assignments.filter((assignment) => assignment.attachments?.length);
-  const submittedAssignments = assignments.filter((assignment) => assignment.submitted_at || assignment.submitted_file_name);
+  const visibleAssignments = filterAssignments(assignments, category);
+  const submittedAssignments = assignments.filter(isCompleted);
+  const categories = [["pending", "Pending"], ["recent", "Recent (last 7 days)"], ["completed", "Completed"], ["all", "View All"]];
+
+  function changeCategory(nextCategory) {
+    setCategory(nextCategory);
+    const visible = filterAssignments(assignments, nextCategory);
+    setSelectedAssignment(current => visible.find(assignment => assignment.assignment_id === current?.assignment_id) || visible[0] || null);
+    setSelectedFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    setMessage("");
+  }
 
   function changeView(view) {
     setActiveView(view);
@@ -279,22 +294,34 @@ export default function AssignmentsPage() {
         <div className="module-content-area">
           {error && <div className="tip-box red-action">{error}</div>}
           {message && <div className="download-message">{message}</div>}
+          {activeView !== "feedback" && <>
+            <div className={styles.filters} role="group" aria-label="Filter assignments">
+              {categories.map(([value, label]) => <button key={value} type="button"
+                aria-pressed={category === value} disabled={loading || saving}
+                onClick={() => changeCategory(value)}>
+                {label} <span>{filterAssignments(assignments, value).length}</span>
+              </button>)}
+            </div>
+            <p className={styles.hint}>Newest assignments first. Pending includes overdue work and stays here until submitted.</p>
+          </>}
 
           {activeView === "materials" && <>
           <div className="assignment-layout">
             <article className="module-card assignment-list-card">
               <div className="card-title-row">
                 <h2>Assignment Materials</h2>
-                <span className="status-pill">{assignmentsWithMaterials.length}</span>
+                <span className="status-pill">{visibleAssignments.length}</span>
               </div>
               <table className="data-table">
                 <thead><tr><th>Assignment</th><th>Action</th></tr></thead>
                 <tbody>
-                  {assignments.flatMap((assignment) => {
+                  {visibleAssignments.flatMap((assignment) => {
                     const rows = assignment.attachments?.length ? assignment.attachments : [null];
                     return rows.map((attachment) => (
                     <tr key={attachment?.file_id || `assignment-${assignment.assignment_id}`}>
-                      <td data-label="Assignment">{assignment.assignment_title}</td>
+                      <td data-label="Assignment">{assignment.assignment_title}
+                        <small className={styles.metadata}>Created: {formatDate(assignment.created_datetime)} · Due: {formatDate(assignment.due_date)} · {isCompleted(assignment) ? "Completed" : "Pending"}</small>
+                      </td>
                       <td data-label="Action">
                         {attachment ? <a className="table-action" href={attachment.view_url} target="_blank" rel="noreferrer" onClick={() => selectAssignment(assignment)}>
                           {attachment.file_name?.toLowerCase().endsWith(".pdf") ? "View PDF" : "View File"}
@@ -302,7 +329,8 @@ export default function AssignmentsPage() {
                       </td>
                     </tr>
                   ));})}
-                  {!loading && assignments.length === 0 && <tr><td colSpan="2">No assignments available.</td></tr>}
+                  {loading && <tr><td colSpan="2" role="status">Loading assignments…</td></tr>}
+                  {!loading && visibleAssignments.length === 0 && <tr><td colSpan="2">No assignments in this category.</td></tr>}
                 </tbody>
               </table>
               <div className="tip-box">Tip: Submit your assignments on time to get early feedback and improve your score!</div>
@@ -315,12 +343,12 @@ export default function AssignmentsPage() {
 
           {activeView === "submit" && (
             <article className="module-card assignment-status-card">
-              <div className="card-title-row"><h2>Assignment Submission Status</h2><span className="status-pill">{assignments.length}</span></div>
+              <div className="card-title-row"><h2>Assignment Submission Status</h2><span className="status-pill">{visibleAssignments.length}</span></div>
               <table className="data-table">
                 <thead><tr><th>Assignment</th><th>Due Date</th><th>Status</th></tr></thead>
                 <tbody>
-                  {assignments.map((assignment) => {
-                    const completed = Boolean(assignment.submitted_at || assignment.submitted_file_name);
+                  {visibleAssignments.map((assignment) => {
+                    const completed = isCompleted(assignment);
                     return (
                       <tr key={assignment.assignment_id}>
                         <td data-label="Assignment">{assignment.assignment_title}</td>
@@ -329,7 +357,8 @@ export default function AssignmentsPage() {
                       </tr>
                     );
                   })}
-                  {!loading && assignments.length === 0 && <tr><td colSpan="3">No assignments available.</td></tr>}
+                  {loading && <tr><td colSpan="3" role="status">Loading assignments…</td></tr>}
+                  {!loading && visibleAssignments.length === 0 && <tr><td colSpan="3">No assignments in this category.</td></tr>}
                 </tbody>
               </table>
             </article>

@@ -8,12 +8,13 @@ from urllib.request import Request, urlopen
 from typing import Any
 
 from utils.ai_tracker import log_ai_usage
+from performance_summary import CATEGORIES, LABELS, marks_classification
 
 
 TRACKS = {
     "Fast Reader": {
         "title": "Fast Reader Material",
-        "summary": "Short, challenge-focused material for students who read quickly and score strongly.",
+        "summary": "Concise revision notes and challenge practice for strong recorded academic performance.",
         "steps": [
             "Read the chapter summary and mark unfamiliar terms.",
             "Attempt higher-order questions before reviewing notes.",
@@ -81,39 +82,28 @@ def classify_reader(
 
 
 def classify_performance(
-    assignment_marks: int | float,
-    quiz_score: int | float,
-    unit_test_marks: int | float,
-    retry_count: int,
-) -> str:
-    """Classify the learner from overall academic performance metrics."""
-    score = 0
+    assignment_marks=None, quiz_score=None, unit_test_marks=None, retry_count=0,
+    *, pt1_marks=None, pt2_marks=None, weekly_test_marks=None,
+) -> str | None:
+    """Academic categories only; deprecated unit-test/retry inputs are ignored."""
+    classification, _ = marks_classification({
+        "pt1_marks": pt1_marks, "pt2_marks": pt2_marks,
+        "weekly_test_marks": weekly_test_marks, "quiz_score": quiz_score,
+        "assignment_marks": assignment_marks,
+    })
+    return classification
 
-    if assignment_marks >= 85:
-        score += 2
-    elif assignment_marks >= 60:
-        score += 1
 
-    if quiz_score >= 85:
-        score += 2
-    elif quiz_score >= 60:
-        score += 1
-
-    if unit_test_marks >= 85:
-        score += 2
-    elif unit_test_marks >= 60:
-        score += 1
-
-    if retry_count <= 1:
-        score += 1
-    elif retry_count >= 3:
-        score -= 1
-
-    if score >= 5:
-        return "Fast Reader"
-    if score >= 3:
-        return "Average Reader"
-    return "Slow Reader"
+def _path_prompt_rules(metrics):
+    if "overall_score" in metrics:
+        return (
+            "Keep the supplied classification fixed. It selects a learning-material track from academic marks, "
+            "not measured reading speed. Use only the supplied PT1, PT2, weekly-test, quiz and assignment percentages. "
+            "Null means not graded or unavailable, never zero or a missing submission. Do not infer retry counts, "
+            "reading speed, attendance, time management or ability from these marks. State only supported evidence. "
+            "Return concise JSON only: summary, focus_area, steps, recommended_materials."
+        )
+    return "Return concise JSON only: summary, focus_area, steps, recommended_materials."
 
 
 class MockLearningPathLLM:
@@ -125,7 +115,7 @@ class MockLearningPathLLM:
         self,
         chapter_title: str,
         classification: str,
-        metrics: dict[str, int],
+        metrics: dict[str, Any],
         user_email: str | None = None,
     ) -> dict[str, Any]:
         track = TRACKS[classification]
@@ -161,7 +151,7 @@ class DeepSeekLearningPathLLM:
         self,
         chapter_title: str,
         classification: str,
-        metrics: dict[str, int],
+        metrics: dict[str, Any],
         user_email: str | None = None,
     ) -> dict[str, Any]:
         if not self.api_key:
@@ -171,6 +161,7 @@ class DeepSeekLearningPathLLM:
             "chapter_title": chapter_title,
             "classification": classification,
             "metrics": metrics,
+            "instructions": _path_prompt_rules(metrics),
             "required_json_shape": {
                 "summary": "short learner-friendly summary",
                 "focus_area": "main improvement area",
@@ -261,7 +252,7 @@ class GeminiLearningPathLLM:
         self,
         chapter_title: str,
         classification: str,
-        metrics: dict[str, int],
+        metrics: dict[str, Any],
         user_email: str | None = None,
     ) -> dict[str, Any]:
         if not self.api_key:
@@ -271,7 +262,7 @@ class GeminiLearningPathLLM:
             "chapter_title": chapter_title,
             "classification": classification,
             "metrics": metrics,
-            "instructions": "Return concise JSON only: summary, focus_area, steps, recommended_materials.",
+            "instructions": _path_prompt_rules(metrics),
         }
         payload = {
             "contents": [
@@ -400,23 +391,24 @@ def _list_or_default(value: Any, default: list[str]) -> list[str]:
     return default
 
 
-def _focus_area(metrics: dict[str, int]) -> str:
+def _focus_area(metrics: dict[str, Any]) -> str:
+    if "overall_score" in metrics:
+        available = [(key, metrics.get(key)) for key in CATEGORIES if metrics.get(key) is not None]
+        if not available:
+            return "Collect graded work before choosing a personalized learning-material track."
+        weakest, value = min(available, key=lambda item: item[1])
+        if value < 75:
+            return f"Practise the topics covered in {LABELS[weakest]} with guided examples and regular review."
+        return "Maintain strong recorded performance with challenge practice and regular revision."
     if "assignment_marks" in metrics or "unit_test_marks" in metrics:
-        assignment_marks = metrics.get("assignment_marks", 0)
-        quiz_score = metrics.get("quiz_score", 0)
-        unit_test_marks = metrics.get("unit_test_marks", 0)
-        retry_count = metrics.get("retry_count", 0)
-
-        if unit_test_marks < 60:
-            return "Strengthen core exam readiness with guided revision and frequent checkpoints."
-        if quiz_score < 60:
-            return "Improve quick recall and quiz accuracy through targeted practice."
-        if assignment_marks < 60:
-            return "Build consistency in assignment completion and concept application."
-        if retry_count >= 3:
-            return "Reduce repeated attempts with focused review before practice."
+        for key, text in [
+            ("unit_test_marks", "Strengthen exam readiness with guided revision."),
+            ("quiz_score", "Improve quiz accuracy through targeted practice."),
+            ("assignment_marks", "Practise concepts from graded assignments."),
+        ]:
+            if metrics.get(key) is not None and metrics[key] < 60:
+                return text
         return "Maintain strong performance with challenge practice and periodic revision."
-
     if metrics["comprehension_score"] < 60:
         return "Build comprehension through smaller reading blocks and recap questions."
     if metrics["quiz_score"] < 60:

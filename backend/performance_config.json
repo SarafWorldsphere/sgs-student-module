@@ -1,0 +1,17 @@
+{
+  "tables": {
+    "marks": "sgs_student_marks",
+    "exams": "sgs_exam_master",
+    "assessments": "sgs_assessments",
+    "assessment_results": "sgs_assessment_results",
+    "assignments": "sgs_assignment_results",
+    "quizzes": "sgs_quiz_response"
+  },
+  "average_reader_minimum": 50,
+  "fast_reader_minimum": 75,
+  "direct_component_maxima": {
+    "pt1_marks": null,
+    "pt2_marks": null,
+    "weekly_test_marks": null
+  }
+}

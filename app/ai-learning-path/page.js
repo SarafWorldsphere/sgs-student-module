@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import AppSelect from "../app-select";
 import { getApiBaseUrl } from "../api-base-url";
 import { getLoggedInUserEmail } from "../login-session";
@@ -30,7 +30,7 @@ const learnerTracks = [
 ];
 
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, options);
+  const response = await fetch(url, { credentials: "include", cache: "no-store", ...options });
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
@@ -42,10 +42,10 @@ async function fetchJson(url, options = {}) {
 
 function metricValue(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
-    return "0";
+    return "Not graded";
   }
 
-  return Number(value).toFixed(1).replace(/\.0$/, "");
+  return `${Number(value).toFixed(1).replace(/\.0$/, "")}%`;
 }
 
 export default function AiLearningPathPage() {
@@ -68,8 +68,7 @@ export default function AiLearningPathPage() {
   const [generatingPath, setGeneratingPath] = useState(false);
   const [generatingContent, setGeneratingContent] = useState(false);
 
-  const classification = performance?.classification || "Average Reader";
-  const selectedTrack = useMemo(() => learnerTracks.find((track) => track.key === classification) || learnerTracks[1], [classification]);
+  const classification = performance?.classification || null;
 
   useEffect(() => {
     let cancelled = false;
@@ -215,6 +214,8 @@ export default function AiLearningPathPage() {
     try {
       const data = await fetchJson(`${API_BASE_URL}/student-performance-summary?student_id=${student.student_id}`);
       setPerformance(data);
+      setLearningPath(null);
+      setGeneratedContent(null);
       setStatus("Performance summary refreshed.");
     } catch (refreshError) {
       setError(refreshError.message || "Unable to refresh performance summary.");
@@ -222,7 +223,7 @@ export default function AiLearningPathPage() {
   }
 
   async function generateLearningPath() {
-    if (!student || !performance) {
+    if (!student || !classification) {
       return;
     }
 
@@ -235,14 +236,10 @@ export default function AiLearningPathPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          student_id: student.student_id,
-          assignment_marks: performance.assignment_marks,
-          quiz_score: performance.quiz_score,
-          unit_test_marks: performance.unit_test_marks,
-          retry_count: performance.retry_count
+          student_id: student.student_id
         })
       });
-      setPerformance((current) => ({ ...(current || {}), ...data.metrics, classification: data.classification }));
+      setPerformance(data.performance);
       setLearningPath(data.learning_path);
       setStatus("AI learning path generated from overall performance.");
     } catch (generateError) {
@@ -253,7 +250,7 @@ export default function AiLearningPathPage() {
   }
 
   async function generateStudyContent() {
-    if (!student || !selectedChapter) {
+    if (!student || !selectedChapter || !classification) {
       setError("Please select a class, subject, and chapter before generating content.");
       return;
     }
@@ -268,11 +265,12 @@ export default function AiLearningPathPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           student_id: student.student_id,
-          chapter_content_id: Number(selectedChapter),
-          classification
+          chapter_content_id: Number(selectedChapter)
         })
       });
       setGeneratedContent(data);
+      setPerformance(data.performance);
+      if (data.classification !== classification) setLearningPath(null);
       setStatus("AI study content generated for the selected chapter.");
     } catch (generateError) {
       setError(generateError.message || "Unable to generate study content.");
@@ -283,16 +281,16 @@ export default function AiLearningPathPage() {
 
   return (
     <DashboardShell>
-      <section className="module-page">
+      <section className="module-page learning-path-page">
         <StudyTabs />
         <div className="module-content-area">
           <article className="module-card ai-learning-card">
             <div className="card-title-row">
               <div>
                 <h2>AI Learning Path</h2>
-                <p>Overall performance decides the learner path; selected chapter decides generated study content.</p>
+                <p>PT1, PT2, weekly test, quiz and assignment marks guide your learning path. Select a chapter for study content.</p>
               </div>
-              <span className="status-pill completed">{classification}</span>
+              <span className={`status-pill ${classification ? "completed" : "not-started"}`}>{classification || "Awaiting marks"}</span>
             </div>
 
             <div className="learning-track-grid">
@@ -307,12 +305,17 @@ export default function AiLearningPathPage() {
               ))}
             </div>
 
-            <div className="result-grid">
-              <div><span>Assignment Marks</span><strong>{metricValue(performance?.assignment_marks)}%</strong></div>
-              <div><span>Quiz Result</span><strong>{metricValue(performance?.quiz_score)}%</strong></div>
-              <div><span>Unit Test Marks</span><strong>{metricValue(performance?.unit_test_marks)}%</strong></div>
-              <div><span>Retry Count</span><strong>{performance?.retry_count ?? 0}</strong></div>
+            <div className="result-grid learning-marks-grid" aria-label="Marks used for learning path">
+              <div><span>PT1</span><strong>{metricValue(performance?.pt1_marks)}</strong></div>
+              <div><span>PT2</span><strong>{metricValue(performance?.pt2_marks)}</strong></div>
+              <div><span>Weekly Test</span><strong>{metricValue(performance?.weekly_test_marks)}</strong></div>
+              <div><span>Quiz</span><strong>{metricValue(performance?.quiz_score)}</strong></div>
+              <div><span>Assignment</span><strong>{metricValue(performance?.assignment_marks)}</strong></div>
+              <div><span>Overall Score</span><strong>{metricValue(performance?.overall_score)}</strong></div>
             </div>
+            {performance && <p className="learning-scoring-note">Equal weight for available categories only. Slow: below 50%; Average: 50–below 75%; Fast: 75% or above. This chooses study material, not a measured reading speed.</p>}
+            {performance && !classification && <div className="learning-status notice" role="status">No graded marks are available yet. Your learning path will be available after marks are recorded.</div>}
+            {Boolean(performance?.grading_scale_needed?.length) && <div className="learning-status notice" role="status">Some {performance.grading_scale_needed.join(", ")} marks need a confirmed grading scale before they can be included.</div>}
 
             <div className="learning-form-grid">
               <label>
@@ -358,10 +361,10 @@ export default function AiLearningPathPage() {
 
             <div className="quiz-submit-row">
               <button className="soft-button" type="button" onClick={refreshPerformance} disabled={loadingPage}>Refresh Performance</button>
-              <button className="primary-button" type="button" onClick={generateLearningPath} disabled={!performance || generatingPath}>
+              <button className="primary-button" type="button" onClick={generateLearningPath} disabled={!classification || generatingPath || generatingContent}>
                 {generatingPath ? "Generating..." : "Generate Path"}
               </button>
-              <button className="primary-button" type="button" onClick={generateStudyContent} disabled={!selectedChapter || generatingContent}>
+              <button className="primary-button" type="button" onClick={generateStudyContent} disabled={!classification || !selectedChapter || generatingContent || generatingPath}>
                 {generatingContent ? "Generating..." : "Generate Content"}
               </button>
             </div>
