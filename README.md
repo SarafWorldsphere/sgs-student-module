@@ -2,6 +2,8 @@
 
 Student dashboard with a FastAPI backend and PostgreSQL content storage.
 
+Student timetable setup and API contract: [docs/STUDENT_TIMETABLE.md](docs/STUDENT_TIMETABLE.md).
+
 Database pooling setup, tests and rollout verification: [docs/CONNECTION_POOLING.md](docs/CONNECTION_POOLING.md).
 
 For AWS EC2, Nginx, and RDS deployment, see [docs/EC2_DEPLOYMENT.md](docs/EC2_DEPLOYMENT.md).

@@ -28,6 +28,7 @@ from database import initialize_database_pool, close_database_pool, database_con
 
 from ai_learning_path_service import classify_performance, classify_reader, get_learning_path_generator
 from student_analysis import create_student_analysis_router
+from student_timetable import create_student_timetable_router
 from utils.ai_tracker import log_ai_usage
 
 
@@ -315,6 +316,7 @@ async def fetch_student_email(student_id: int) -> str | None:
 
 
 app.include_router(create_student_analysis_router(get_connection, fetch_current_student_record))
+app.include_router(create_student_timetable_router(get_connection, fetch_current_student_record))
 
 
 def extract_json_object(content: str) -> dict:
