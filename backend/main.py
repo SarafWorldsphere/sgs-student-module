@@ -567,6 +567,7 @@ async def get_current_assignments(
                         a.assignment_id,
                         a.assignment_title,
                         a.assignment_text,
+                        a.created_datetime,
                         a.due_date,
                         a.class_id,
                         a.subject_id,
@@ -585,7 +586,7 @@ async def get_current_assignments(
                      AND COALESCE(r.record_status, 'ACTIVE') = 'ACTIVE'
                     WHERE a.class_id = %s
                       AND COALESCE(a.record_status, 'Active') = 'Active'
-                    ORDER BY a.due_date ASC NULLS LAST, a.assignment_id DESC
+                    ORDER BY a.created_datetime DESC NULLS LAST, a.assignment_id DESC
                     """,
                     (student_id, class_id),
                 )
@@ -650,13 +651,16 @@ async def get_current_assignments(
 
     normalized_assignments = []
     for index, assignment in enumerate(assignments, start=1):
-        submitted = bool(assignment.get("submitted_at") or assignment.get("submitted_file_name"))
+        submitted = bool(assignment.get("submitted_at") or assignment.get("submitted_file_name")) or str(
+            assignment.get("submission_status") or ""
+        ).strip().lower() in {"submitted", "completed", "graded", "evaluated"}
         normalized_assignments.append(
             {
                 "number": index,
                 "assignment_id": assignment["assignment_id"],
                 "assignment_title": assignment.get("assignment_title") or "Assignment",
                 "assignment_text": assignment.get("assignment_text") or "",
+                "created_datetime": assignment.get("created_datetime"),
                 "due_date": assignment.get("due_date"),
                 "class_id": assignment.get("class_id"),
                 "subject_id": assignment.get("subject_id"),
