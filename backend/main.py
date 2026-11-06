@@ -30,6 +30,7 @@ from database import initialize_database_pool, close_database_pool, database_con
 from ai_learning_path_service import classify_performance, classify_reader, get_learning_path_generator
 from student_analysis import create_student_analysis_router
 from student_timetable import create_student_timetable_router
+from notification_order import newest_notifications
 from utils.ai_tracker import log_ai_usage
 
 
@@ -1129,6 +1130,7 @@ async def get_notifications(email: str = Query(..., min_length=3, max_length=150
             a.assignment_id,
             a.assignment_title,
             a.assignment_text,
+            a.created_datetime,
             a.due_date,
             a.class_id,
             a.subject_id,
@@ -1142,7 +1144,7 @@ async def get_notifications(email: str = Query(..., min_length=3, max_length=150
           AND COALESCE(a.record_status, 'Active') = 'Active'
           AND a.due_date IS NOT NULL
           AND a.due_date <= %s
-        ORDER BY a.due_date ASC, a.assignment_id DESC
+        ORDER BY a.created_datetime DESC NULLS LAST, a.assignment_id DESC
         LIMIT 12;
     """
     notices_query = """
@@ -1163,8 +1165,6 @@ async def get_notifications(email: str = Query(..., min_length=3, max_length=150
             OR LOWER(applicable_class) IN ('all', LOWER(%s))
           )
         ORDER BY
-            COALESCE(is_read, false) ASC,
-            notice_date DESC NULLS LAST,
             created_datetime DESC NULLS LAST,
             notice_id DESC
         LIMIT 10;
@@ -1179,6 +1179,7 @@ async def get_notifications(email: str = Query(..., min_length=3, max_length=150
             assessment.max_marks,
             result.marks_obtained,
             result.percentage,
+            result.created_at AS result_created_at,
             COALESCE(result.is_absent, false) AS is_absent
         FROM assessment_results result
         INNER JOIN assessments assessment
@@ -1186,7 +1187,7 @@ async def get_notifications(email: str = Query(..., min_length=3, max_length=150
         WHERE result.student_id = %s
           AND COALESCE(result.record_status, 'Active') = 'Active'
           AND COALESCE(assessment.record_status, 'Active') = 'Active'
-        ORDER BY assessment.assessment_date DESC NULLS LAST, assessment.assessment_id DESC
+        ORDER BY result.created_at DESC NULLS LAST, assessment.assessment_id DESC
         LIMIT 10;
     """
     read_status_query = """
@@ -1240,6 +1241,7 @@ async def get_notifications(email: str = Query(..., min_length=3, max_length=150
             {
                 "type": "assignment",
                 "id": f"assignment-{row['assignment_id']}",
+                "created_at": row.get("created_datetime"),
                 "assignment_id": row["assignment_id"],
                 "source_id": row["assignment_id"],
                 "title": row.get("assignment_title") or "Assignment",
@@ -1269,6 +1271,7 @@ async def get_notifications(email: str = Query(..., min_length=3, max_length=150
         {
             "type": "notice",
             "id": f"notice-{notice['notice_id']}",
+            "created_at": notice.get("created_datetime"),
             "notice_id": notice["notice_id"],
             "source_id": notice["notice_id"],
             "title": notice.get("notice_title") or "Notice",
@@ -1285,6 +1288,7 @@ async def get_notifications(email: str = Query(..., min_length=3, max_length=150
         {
             "type": "result",
             "id": f"result-{result['assessment_id']}",
+            "created_at": result.get("result_created_at"),
             "source_id": result["assessment_id"],
             "assessment_id": result["assessment_id"],
             "title": result.get("title") or result.get("assessment_type") or "Assessment Result",
@@ -1300,7 +1304,10 @@ async def get_notifications(email: str = Query(..., min_length=3, max_length=150
         }
         for result in result_rows
     ]
-    notifications = [*assignments, *notices, *results]
+    assignments = newest_notifications(assignments)
+    notices = newest_notifications(notices)
+    results = newest_notifications(results)
+    notifications = newest_notifications([*assignments, *notices, *results])
     count = sum(1 for item in notifications if item.get("is_countable") and not item.get("is_read"))
 
     return {
