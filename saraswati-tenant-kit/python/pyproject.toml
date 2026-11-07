@@ -1,0 +1,25 @@
+[project]
+name = "saraswati-tenant"
+version = "0.1.0"
+description = "School resolution, row-level security session binding, and S3 key rules."
+requires-python = ">=3.11"
+dependencies = [
+    "psycopg[binary]>=3.1",
+    "psycopg-pool>=3.2",
+    "starlette>=0.37",
+]
+
+[project.optional-dependencies]
+sqlalchemy = ["SQLAlchemy>=2"]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["saraswati_tenant*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

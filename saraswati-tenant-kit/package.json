@@ -1,0 +1,14 @@
+{
+  "name": "@saraswati/tenant-kit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Load a school's branding JSON and render the shared school mark.",
+  "main": "./js/src/index.ts",
+  "types": "./js/src/index.ts",
+  "exports": {
+    ".": "./js/src/index.ts"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  }
+}
