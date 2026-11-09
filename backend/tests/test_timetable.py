@@ -86,8 +86,8 @@ class TimetableTests(unittest.TestCase):
         calls = self.cursor.execute.await_args_list
         self.assertEqual(calls[3].args[1], ("2026-27", "half"))
         self.assertEqual(calls[4].args[1], ("2026-27", 18, "A"))
-        self.assertIn('"sgs_timetable"', calls[4].args[0])
-        self.assertIn("record_status", calls[4].args[0])
+        self.assertIn('"timetable"', calls[4].args[0])
+        self.assertNotIn("record_status", calls[4].args[0])
 
     def test_unknown_year_is_not_silently_replaced(self):
         self.assertEqual(self.get(academic_year="1990-91").status_code, 404)
@@ -131,7 +131,7 @@ class ConfigurationTests(unittest.TestCase):
     def test_all_timetable_names_live_in_json(self):
         names = json.loads((Path(__file__).resolve().parents[1] / "timetable_tables.json").read_text())
         self.assertEqual(set(names), {"classes", "periods", "timetable", "teachers"})
-        self.assertEqual(load_tables().periods, '"sgs_period_master"')
+        self.assertEqual(load_tables().periods, '"period_master"')
 
 
 if __name__ == "__main__":

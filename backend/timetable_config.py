@@ -1,4 +1,4 @@
-"""Central relation names for the staging student timetable reader."""
+"""Central relation names for the SaaS student timetable reader."""
 import json
 from pathlib import Path
 import re

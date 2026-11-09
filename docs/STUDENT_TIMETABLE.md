@@ -1,4 +1,4 @@
-# Student timetable (staging/main)
+# Student timetable (SaaS)
 
 This feature reads the schedule maintained by the Admin dashboard. Students do
 not create or edit slots. The admin's bulk `PUT /api/timetable` and teacher-clash
@@ -40,16 +40,19 @@ The result includes:
 - slots contain period number, subject and teacher details. Free periods are
   absent from `slots`; break periods never receive teaching slots.
 
-Only active period/slot records are read. Teacher lookup allows the staging
-schema's string teacher IDs. Query values remain bound parameters.
+The canonical SaaS period/slot tables have no `record_status` field. Teacher
+lookup accepts numeric or string IDs. Query values remain bound parameters.
+Every read uses the existing tenant-bound database connection and RLS context.
 
 ## Configuration and rollout
 
-`backend/timetable_tables.json` contains the four staging table names:
-`sgs_period_master`, `sgs_timetable`, `sgs_class_master`, `sgs_teacher_master`.
-Names are validated and quoted by `timetable_config.py`. This is the staging
-schema implementation; changing names alone does not port it to the SaaS schema,
-which omits staging `record_status` fields.
+`backend/timetable_tables.json` names the canonical unprefixed tables:
+`period_master`, `timetable`, `class_master`, `teacher_master`. Names are validated
+and quoted by `timetable_config.py`. Never point this SaaS reader at staging's
+`sgs_` tables. The existing pool and tenant-kit apply the resolved school's RLS
+context; this route does not create a separate pool or accept a tenant ID.
+The deployment owner must provision tenant-protected timetable tables before
+rollout; a missing relation returns 503 instead of a fabricated empty schedule.
 
 Use the existing student backend environment and dependency setup. No database
 migration, period seeding, copied admin schedule, or live data change is needed.
@@ -70,6 +73,13 @@ npm run build
 
 Optional real-SQL tests use `TIMETABLE_TEST_DATABASE_URL` pointing only to a local
 database named `student_timetable_test`. They create connection-local temporary
-tables and verify real student lookup, class/section scoping, inactive rows,
-teacher resolution, full/half-day timings, breaks, and omitted free slots.
+tables and verify real student lookup, class/section scoping, teacher resolution, full/half-day timings, breaks, and omitted free slots.
 No staging/production test database is permitted.
+
+On this SaaS branch, `test_timetable_saas.py` additionally creates a disposable
+schema and restricted role in that local database. It tests the real pooled
+connection and kit RLS binding with two schools sharing the same email, class,
+student and teacher IDs. It verifies nine periods, teacher joins, connection
+reuse, unknown-host rejection and that a browser tenant header cannot change
+the school selected by its host. The fixtures and test role are removed after
+each test. The local test administrator must be allowed to create test roles.

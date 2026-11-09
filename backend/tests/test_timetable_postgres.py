@@ -31,33 +31,31 @@ class TimetablePostgresTests(unittest.IsolatedAsyncioTestCase):
             raise RuntimeError("Timetable SQL tests require local student_timetable_test, never staging or production.")
         self.connection = await psycopg.AsyncConnection.connect(URL)
         await self.connection.execute("""
-            CREATE TEMP TABLE sgs_class_master (class_id bigint, class_name text, academic_year text, section_name text);
-            CREATE TEMP TABLE sgs_student_master (student_id bigint, full_name text, roll_no text, admission_no text,
+            CREATE TEMP TABLE class_master (class_id bigint, class_name text, academic_year text, section_name text);
+            CREATE TEMP TABLE student_master (student_id bigint, full_name text, roll_no text, admission_no text,
                 class_id bigint, class_name text, section text, student_email text, student_phone text, record_status text);
-            CREATE TEMP TABLE sgs_period_master (period_id bigint, academic_year text, schedule_type text,
-                period_no integer, period_label text, start_time time, end_time time, is_teaching boolean, record_status text);
-            CREATE TEMP TABLE sgs_timetable (timetable_id bigint, academic_year text, class_id bigint, section text,
-                day_of_week integer, period_no integer, subject_name text, teacher_id text, record_status text);
-            CREATE TEMP TABLE sgs_teacher_master (teacher_id text, full_name text);
-            INSERT INTO sgs_class_master VALUES (18,'Class 8','2026-27','A'),(19,'Class 9','2026-27','B');
-            INSERT INTO sgs_student_master VALUES (1,'Student A','1','A1',18,'Class 8','A','student@gmail.com',NULL,'Active');
-            INSERT INTO sgs_teacher_master VALUES ('T1','Maths Teacher'),('T2','English Teacher');
-            INSERT INTO sgs_period_master VALUES
-                (1,'2026-27','full',0,'Assembly','09:00','09:15',false,'Active'),
-                (2,'2026-27','full',1,'Period 1','09:15','10:00',true,'Active'),
-                (3,'2026-27','full',2,'Break','10:00','10:15',false,'Active'),
-                (4,'2026-27','full',3,'Period 2','10:15','11:00',true,'Active'),
-                (5,'2026-27','half',1,'Period 1','08:00','08:40',true,'Active'),
-                (6,'2026-27','full',9,'Inactive','13:00','13:40',true,'Inactive'),
-                (7,'2027-28','full',1,'Future year','09:00','10:00',true,'Active');
-            INSERT INTO sgs_timetable VALUES
-                (1,'2026-27',18,'A',1,1,'Maths','T1','Active'),
-                (2,'2026-27',18,'A',1,3,'English','T2','Active'),
-                (3,'2026-27',18,'A',2,3,'Science','UNKNOWN','Active'),
-                (4,'2026-27',19,'A',1,1,'Other class','T1','Active'),
-                (5,'2026-27',18,'B',1,1,'Other section','T1','Active'),
-                (6,'2026-27',18,'A',3,1,'Inactive slot','T1','Inactive'),
-                (7,'2026-27',18,'A',1,0,'Not a lesson','T1','Active');
+            CREATE TEMP TABLE period_master (period_id bigint, academic_year text, schedule_type text,
+                period_no integer, period_label text, start_time time, end_time time, is_teaching boolean);
+            CREATE TEMP TABLE timetable (timetable_id bigint, academic_year text, class_id bigint, section text,
+                day_of_week integer, period_no integer, subject_name text, teacher_id text);
+            CREATE TEMP TABLE teacher_master (teacher_id text, full_name text);
+            INSERT INTO class_master VALUES (18,'Class 8','2026-27','A'),(19,'Class 9','2026-27','B');
+            INSERT INTO student_master VALUES (1,'Student A','1','A1',18,'Class 8','A','student@gmail.com',NULL,'Active');
+            INSERT INTO teacher_master VALUES ('T1','Maths Teacher'),('T2','English Teacher');
+            INSERT INTO period_master VALUES
+                (1,'2026-27','full',0,'Assembly','09:00','09:15',false),
+                (2,'2026-27','full',1,'Period 1','09:15','10:00',true),
+                (3,'2026-27','full',2,'Break','10:00','10:15',false),
+                (4,'2026-27','full',3,'Period 2','10:15','11:00',true),
+                (5,'2026-27','half',1,'Period 1','08:00','08:40',true),
+                (7,'2027-28','full',1,'Future year','09:00','10:00',true);
+            INSERT INTO timetable VALUES
+                (1,'2026-27',18,'A',1,1,'Maths','T1'),
+                (2,'2026-27',18,'A',1,3,'English','T2'),
+                (3,'2026-27',18,'A',2,3,'Science','UNKNOWN'),
+                (4,'2026-27',19,'A',1,1,'Other class','T1'),
+                (5,'2026-27',18,'B',1,1,'Other section','T1'),
+                (7,'2026-27',18,'A',1,0,'Not a lesson','T1');
         """)
 
         @asynccontextmanager

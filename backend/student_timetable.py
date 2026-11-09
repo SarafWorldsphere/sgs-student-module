@@ -44,12 +44,10 @@ def create_student_timetable_router(get_connection: Callable, fetch_student: Cal
                         f"""
                         SELECT academic_year FROM {tables.periods}
                         WHERE NULLIF(BTRIM(academic_year), '') IS NOT NULL
-                          AND COALESCE(record_status, 'Active') = 'Active'
                         UNION
                         SELECT academic_year FROM {tables.timetable}
                         WHERE class_id = %s AND LOWER(BTRIM(section)) = LOWER(%s)
                           AND NULLIF(BTRIM(academic_year), '') IS NOT NULL
-                          AND COALESCE(record_status, 'Active') = 'Active'
                         ORDER BY academic_year DESC
                         """,
                         (student_class, student_section),
@@ -62,7 +60,6 @@ def create_student_timetable_router(get_connection: Callable, fetch_student: Cal
                     await cursor.execute(
                         f"""SELECT DISTINCT schedule_type FROM {tables.periods}
                         WHERE academic_year = %s AND NULLIF(BTRIM(schedule_type), '') IS NOT NULL
-                          AND COALESCE(record_status, 'Active') = 'Active'
                         ORDER BY schedule_type""", (year,),
                     )
                     schedule_types = [row["schedule_type"] for row in await cursor.fetchall()]
@@ -70,7 +67,6 @@ def create_student_timetable_router(get_connection: Callable, fetch_student: Cal
                         f"""SELECT period_id, period_no, period_label, start_time, end_time, is_teaching
                         FROM {tables.periods}
                         WHERE academic_year = %s AND schedule_type = %s
-                          AND COALESCE(record_status, 'Active') = 'Active'
                         ORDER BY start_time, period_no""", (year, schedule_type),
                     )
                     periods = await cursor.fetchall()
@@ -83,7 +79,6 @@ def create_student_timetable_router(get_connection: Callable, fetch_student: Cal
                         WHERE slot.academic_year = %s AND slot.class_id = %s
                           AND LOWER(BTRIM(slot.section)) = LOWER(%s)
                           AND slot.day_of_week BETWEEN 1 AND 6
-                          AND COALESCE(slot.record_status, 'Active') = 'Active'
                         ORDER BY slot.day_of_week, slot.period_no, slot.timetable_id""",
                         (year, student_class, student_section),
                     )
