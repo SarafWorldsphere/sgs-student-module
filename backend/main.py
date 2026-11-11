@@ -902,6 +902,8 @@ async def get_chapter_content_list(
                       WHERE metadata.entity_id = content.chapter_id
                         AND UPPER(BTRIM(metadata.entity_type)) = %s
                         AND NULLIF(BTRIM(metadata.file_url), '') IS NOT NULL
+                        AND LOWER(COALESCE(NULLIF(BTRIM(metadata.file_name), ''),
+                            SPLIT_PART(SPLIT_PART(BTRIM(metadata.file_url), '?', 1), '#', 1))) LIKE '%%.pdf'
                         AND LOWER(COALESCE(metadata.record_status, 'Active')) = 'active'
                   )
               )
@@ -2289,6 +2291,8 @@ async def get_chapter_content(
                 WHERE metadata.entity_id = content.chapter_id
                   AND UPPER(BTRIM(metadata.entity_type)) = %s
                   AND NULLIF(BTRIM(metadata.file_url), '') IS NOT NULL
+                  AND LOWER(COALESCE(NULLIF(BTRIM(metadata.file_name), ''),
+                      SPLIT_PART(SPLIT_PART(BTRIM(metadata.file_url), '?', 1), '#', 1))) LIKE '%%.pdf'
                   AND LOWER(COALESCE(metadata.record_status, 'Active')) = 'active'
                 ORDER BY metadata.created_at DESC NULLS LAST, metadata.file_id DESC
                 LIMIT 1
