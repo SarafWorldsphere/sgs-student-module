@@ -3,6 +3,7 @@
 Student dashboard with a FastAPI backend and PostgreSQL content storage.
 
 On branch `saas`, start with [the tenant-kit setup](docs/SAAS_SETUP.md). This branch uses the canonical tenant-kit sample schema and host-based school context.
+For the shared test server's student API routing, use [deploy/sgs-test](deploy/sgs-test/README.md).
 Student timetable setup and API contract: [docs/STUDENT_TIMETABLE.md](docs/STUDENT_TIMETABLE.md).
 
 Database pooling setup, tests and rollout verification: [docs/CONNECTION_POOLING.md](docs/CONNECTION_POOLING.md).
